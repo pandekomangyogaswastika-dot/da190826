@@ -1,5 +1,61 @@
 ---
 
+# 🤝 HANDOFF (Session #18 — **FASE G DITEGAKKAN**: setelan penomoran tidak lagi berbohong · D terbukti sudah selesai) ✅
+
+Rincian & bukti: `plan.md` entri **SESI #18**, `memory/CHANGELOG.md` entri **[#18]**, gate baru
+**INV-F25**. Seluruh suite: `bash scripts/gate.sh` → **43/43 PASS · 0 FAIL · 0 SKIP · HIJAU**.
+
+## ⚠️ PELAJARAN YANG JANGAN DIULANG
+1. **UKUR DULU sebelum membangun: ROADMAP bisa BASI.** Owner meminta "daftarkan Dashboard Marketing
+   ke sidebar + sambungkan ke data hidup" — ternyata SUDAH selesai sesi #16 dan gate INV-F20 sudah
+   hijau 8 invarian. Kalau langsung dikerjakan, satu sesi habis membangun ulang yang sudah jalan.
+   **Sebelum menerima entri ROADMAP sebagai pekerjaan, jalankan gate/`grep` yang membuktikannya.**
+2. **Setelan yang tidak ditegakkan lebih buruk daripada setelan yang tidak ada.** Layar Penomoran
+   Dokumen menawarkan Otomatis/Manual untuk 49 jenis; hanya 2 yang menegakkannya. Owner memindah
+   setelan, tersimpan rapi, tampil di layar — dan tidak terjadi apa pun. Kalau sebuah fitur baru
+   hanya bisa dipasang di sebagian tempat, **buat sisanya MENGATAKANNYA** (badge "Otomatis saja")
+   dan tolak di API, jangan biarkan tampak seolah berlaku.
+3. **Menyembunyikan pilihan di layar TIDAK cukup.** API `PUT /api/admin/doc-numbering` tetap bisa
+   dipanggil langsung, jadi penjagaannya harus ada di backend juga (di sini: mode ditolak untuk
+   jenis tanpa `policy_enforced`, sementara FORMAT tetap boleh diubah).
+4. **Satu koleksi+field bisa menampung DUA jenis dokumen.** `dewi_kasbon_requests.request_number`
+   dipakai kasbon (KSB) DAN pinjaman (PIN). Tanpa kunci kedua, memindah kebijakan kasbon ikut
+   memaksa pinjaman. Polanya sudah ada di repo: override `collection`/`field` (lihat
+   `production_pos.po_number_maklon`).
+5. **Kesalahan `search_replace` yang sama terulang lagi** (old_str berakhir newline, new_str tidak →
+   dua baris kode menyambung). Terjadi 3× dalam dua sesi. **Selalu `python3 -m pyflakes <file>`
+   sesudah menyentuh berkas Python.**
+
+## YANG SUDAH SIAP DIPAKAI
+- Gate **INV-F25** `scripts/verify_fase_g2_penomoran_ditegakkan.py` (7 invarian, self-cleaning) —
+  terdaftar di `gate.sh` + daftar `skip_gate`.
+- Komponen bersama `frontend/src/components/erp/docnum/DocNumberField.jsx`
+  (+ `useDocNumberPolicy`, `docNumberPayload`) — pasang di form dokumen mana pun.
+- `data/doc_number_registry.py` → penanda **`policy_enforced`** = sumber kebenaran "jenis mana yang
+  modenya boleh diubah". Menambah jenis baru WAJIB: tandai + wire `issue_number` + pasang
+  `<DocNumberField>` + daftarkan jalur tulisnya di `WRITE_PATHS` gate INV-F25 (G1 akan MERAH kalau
+  hanya ditandai tanpa disambungkan — itu memang tujuannya).
+
+## SISA PEKERJAAN
+1. **41 jenis dokumen** masih "Otomatis saja" (pola menyambungkannya sudah terbukti, lihat di atas).
+   Kandidat berikutnya yang sering dipakai: Surat Jalan Gudang, PR Pengadaan, Purchase Order,
+   Jurnal Umum, Klaim Biaya Karyawan.
+2. **F3/F4 (P1)** Rapikan 5 PDF tersering (SPP · Invoice · Slip Gaji · Picklist · SJ Vendor) ke pola
+   `_pdf_data_table` (auto-wrap + penuh lebar halaman).
+
+## CARA MENGUJI CEPAT (2 menit)
+1. `admin@garment.com` / `Admin@123` → `window.location.hash='sys-doc-numbering'` → reload.
+   Perhatikan: **8** jenis punya toggle Otomatis/Manual, **41** berbadge kuning **"Otomatis saja"**.
+2. Set **Pengajuan Kasbon** → **Manual**. Lalu `window.location.hash='portal-kasbon'` → reload →
+   **Ajukan** ⇒ kolom *"Nomor Pengajuan Kasbon * (manual)"* muncul dengan pola
+   `KSB-{YYYY}{MM}-{SEQ:5}`. Isi nomor berpola bebas ⇒ DITOLAK dengan contoh yang benar.
+   Klik tab **Pinjaman** ⇒ kolomnya berubah jadi terkunci (kebijakan PIN masih otomatis).
+3. Kembalikan **Pengajuan Kasbon** ke **Otomatis** ⇒ kolom nomor terkunci & menampilkan nomor
+   berikutnya (`KSB-202608-000xx`).
+
+---
+---
+
 # 🤝 HANDOFF (Session #17 — **H-6b DITUTUP ⇒ FASE H 100%**: arus keluar Cutting berdokumen, stok tetap turun sekali) ✅
 
 Sesi #17 melanjutkan #16 (H-7/H-8). Rincian & bukti: `plan.md` entri **SESI #17**,

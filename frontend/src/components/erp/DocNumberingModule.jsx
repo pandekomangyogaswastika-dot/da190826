@@ -200,28 +200,49 @@ export default function DocNumberingModule({ token }) {
                       )}
                     </div>
 
-                    {/* FASE G — mode penomoran per jenis dokumen */}
+                    {/* FASE G — mode penomoran per jenis dokumen.
+                        SESI #18 — KEJUJURAN: mode hanya bisa dipindah untuk jenis dokumen
+                        yang JALUR TULISNYA sudah menegakkan kebijakan (`policy_enforced`).
+                        Sebelum ini togglenya tampil untuk SEMUA 49 jenis padahal hanya
+                        beberapa yang menegakkannya ⇒ owner memindah ke "Manual", tidak
+                        terjadi apa pun, dan setelan itu berbohong. Sekarang jenis yang
+                        belum ditegakkan mengatakannya terang-terangan. */}
                     <div className="min-w-[190px] space-y-1">
-                      <div className="inline-flex rounded-lg border border-border overflow-hidden">
-                        {[['auto', 'Otomatis'], ['manual', 'Manual']].map(([m, lbl]) => (
-                          <button key={m} onClick={() => setMode(item, m)} disabled={busy === item.key}
-                            data-testid={`docnum-mode-${item.key}-${m}`}
-                            className={`px-2.5 py-1 text-[11px] font-medium transition-colors ${
-                              item.mode === m
-                                ? 'bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))]'
-                                : 'bg-transparent text-muted-foreground hover:text-foreground'}`}>
-                            {lbl}
-                          </button>
-                        ))}
-                      </div>
-                      <p className="text-[11px] text-muted-foreground" data-testid={`docnum-mode-hint-${item.key}`}>
-                        {item.mode === 'manual'
-                          ? 'Nomor diketik petugas — yang tidak sesuai pola ditolak.'
-                          : 'Nomor dibuat sistem — kolom nomor di form dikunci.'}
-                        {item.mode_is_custom && item.mode !== item.mode_default && (
-                          <span className="text-primary"> (bawaan: {item.mode_default === 'auto' ? 'otomatis' : 'manual'})</span>
-                        )}
-                      </p>
+                      {item.policy_enforced ? (
+                        <>
+                          <div className="inline-flex rounded-lg border border-border overflow-hidden">
+                            {[['auto', 'Otomatis'], ['manual', 'Manual']].map(([m, lbl]) => (
+                              <button key={m} onClick={() => setMode(item, m)} disabled={busy === item.key}
+                                data-testid={`docnum-mode-${item.key}-${m}`}
+                                className={`px-2.5 py-1 text-[11px] font-medium transition-colors ${
+                                  item.mode === m
+                                    ? 'bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))]'
+                                    : 'bg-transparent text-muted-foreground hover:text-foreground'}`}>
+                                {lbl}
+                              </button>
+                            ))}
+                          </div>
+                          <p className="text-[11px] text-muted-foreground" data-testid={`docnum-mode-hint-${item.key}`}>
+                            {item.mode === 'manual'
+                              ? 'Nomor diketik petugas — yang tidak sesuai pola ditolak.'
+                              : 'Nomor dibuat sistem — kolom nomor di form dikunci.'}
+                            {item.mode_is_custom && item.mode !== item.mode_default && (
+                              <span className="text-primary"> (bawaan: {item.mode_default === 'auto' ? 'otomatis' : 'manual'})</span>
+                            )}
+                          </p>
+                        </>
+                      ) : (
+                        <>
+                          <span className="inline-flex items-center gap-1 px-2 py-1 rounded-lg border border-amber-300 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-500/10 text-[11px] font-semibold text-amber-800 dark:text-amber-200"
+                            data-testid={`docnum-mode-locked-${item.key}`}>
+                            Otomatis saja
+                          </span>
+                          <p className="text-[11px] text-muted-foreground" data-testid={`docnum-mode-hint-${item.key}`}>
+                            Jalur dokumen ini <b>belum menegakkan</b> mode manual, jadi pilihannya
+                            belum ditampilkan agar setelan tidak berbohong. Formatnya tetap berlaku.
+                          </p>
+                        </>
+                      )}
                     </div>
 
                     <div className="flex items-center gap-2">

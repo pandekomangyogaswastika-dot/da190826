@@ -19,6 +19,7 @@ DOC_NUMBER_REGISTRY = [
     # tidak ada yang bisa membuktikan gulungan mana yang dipotong. Mode `auto`
     # menjadi bawaan — roll lahir dari penerimaan barang, bukan dari ketikan.
     {"key": "wh_fabric_rolls.roll_no", "label": "Roll Kain", "group": "Gudang",
+     "policy_enforced": True,
      "default_format": "RL-{YYYY}{MM}-{SEQ:4}", "tokens": [], "default_mode": "auto",
      "catatan": "Dibuat otomatis saat penerimaan kain (rincian roll per gulungan)."},
     {"key": "wh_delivery_notes.sj_number", "label": "Surat Jalan", "group": "Gudang",
@@ -65,10 +66,12 @@ DOC_NUMBER_REGISTRY = [
     # Satu koleksi+field menampung dua jenis dokumen (internal vs maklon) ⇒ kunci
     # kedua memakai override `collection`/`field` seperti pola invoice AR.
     {"key": "production_pos.po_number", "label": "PO Produksi Internal (SPP)", "group": "Produksi",
+     "policy_enforced": True,
      "default_format": "PO-INT-{YYYY}{MM}-{SEQ:4}", "tokens": [], "default_mode": "manual",
      "catatan": "Dipakai juga sebagai nomor SPP. Mode manual = nomor diketik tetapi "
                 "wajib mengikuti pola ini."},
     {"key": "production_pos.po_number_maklon", "label": "PO Maklon (Produksi)", "group": "Maklon",
+     "policy_enforced": True,
      "default_format": "PO-MKL-{YYYY}{MM}-{SEQ:4}", "tokens": [], "default_mode": "manual",
      "collection": "production_pos", "field": "po_number",
      "catatan": "PO maklon yang tersimpan di koleksi PO produksi (SSOT satu penulis)."},
@@ -77,6 +80,7 @@ DOC_NUMBER_REGISTRY = [
     {"key": "dewi_cmt_permak.permak_number", "label": "Permak / Perbaikan", "group": "Produksi",
      "default_format": "PMK/{YYYY}/{MM}/{SEQ:4}", "tokens": []},
     {"key": "cmt_receipts.receipt_code", "label": "Penerimaan FG dari CMT", "group": "Produksi",
+     "policy_enforced": True,
      "default_format": "CMT-RCV-{SEQ:5}", "tokens": []},
     {"key": "production_material_returns.ref_no", "label": "Retur Material Produksi", "group": "Produksi",
      "default_format": "PMR/{YYYY}/{MM}/{SEQ:4}", "tokens": []},
@@ -96,6 +100,7 @@ DOC_NUMBER_REGISTRY = [
      "group": "Maklon", "default_format": "DISP-{KLIEN}-{YYYY}{MM}{DD}-{SEQ:3}",
      "tokens": ["KLIEN"]},
     {"key": "dewi_maklon_invoices.invoice_number", "label": "Invoice Maklon (manual)",
+     "policy_enforced": True,
      "group": "Maklon", "default_format": "{PREFIX}-{YYYY}-{SEQ:4}", "tokens": ["PREFIX"],
      "catatan": "PREFIX mengikuti Pengaturan Sistem 'maklon_invoice_prefix' (bawaan INV-MKL)."},
     {"key": "dewi_maklon.ar_invoice_number", "label": "Invoice Maklon otomatis (AR)",
@@ -110,6 +115,7 @@ DOC_NUMBER_REGISTRY = [
     {"key": "rahaza_journal_entries.je_number", "label": "Jurnal Umum (JE)", "group": "Keuangan",
      "default_format": "JE-{YYYY}{MM}{DD}-{SEQ:4}", "tokens": []},
     {"key": "rahaza_ar_invoices.invoice_number", "label": "Invoice Piutang (AR)", "group": "Keuangan",
+     "policy_enforced": True,
      "default_format": "AR-{YYYY}{MM}{DD}-{SEQ:3}", "tokens": []},
     {"key": "rahaza_credit_notes.cn_number", "label": "Nota Kredit", "group": "Keuangan",
      "default_format": "CN-{YYYY}{MM}{DD}-{SEQ:3}", "tokens": []},
@@ -125,8 +131,21 @@ DOC_NUMBER_REGISTRY = [
     # ── SDM ───────────────────────────────────────────────────────────────────
     {"key": "rahaza_payroll_runs.run_number", "label": "Run Penggajian", "group": "SDM",
      "default_format": "PAY-{YYYY}{MM}-{SEQ:4}", "tokens": []},
+    # SESI #18 (2026-08-17) — satu koleksi `dewi_kasbon_requests` menampung DUA jenis
+    # pengajuan (kasbon & pinjaman) dengan awalan berbeda (KSB / PIN), jadi masing-masing
+    # punya kunci sendiri memakai override `collection`/`field` (pola yang sama dengan
+    # PO Maklon). Tanpa kunci kedua, memindah "Kasbon" ke MANUAL akan ikut memaksa
+    # pengajuan PINJAMAN diketik manual — dua dokumen berbeda dipaksa satu kebijakan.
     {"key": "dewi_kasbon_requests.request_number", "label": "Pengajuan Kasbon", "group": "SDM",
-     "default_format": "KSB-{YYYY}{MM}-{SEQ:5}", "tokens": []},
+     "policy_enforced": True,
+     "default_format": "KSB-{YYYY}{MM}-{SEQ:5}", "tokens": [],
+     "catatan": "Hanya untuk jenis pengajuan KASBON. Pinjaman karyawan punya kuncinya sendiri."},
+    {"key": "dewi_kasbon_requests.request_number_pinjaman",
+     "label": "Pengajuan Pinjaman Karyawan", "group": "SDM",
+     "policy_enforced": True,
+     "default_format": "PIN-{YYYY}{MM}-{SEQ:5}", "tokens": [],
+     "collection": "dewi_kasbon_requests", "field": "request_number",
+     "catatan": "Pinjaman (cicilan >1) yang tersimpan di koleksi pengajuan kasbon."},
     {"key": "rahaza_employee_loans.loan_number", "label": "Pinjaman Karyawan", "group": "SDM",
      "default_format": "LOAN-{SEQ:5}", "tokens": []},
     {"key": "dewi_assets.asset_number", "label": "Aset Inventaris", "group": "SDM",

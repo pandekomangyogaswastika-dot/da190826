@@ -1,3 +1,46 @@
+# [2026-08-17 #18] **FASE G DITEGAKKAN** — setelan penomoran tidak lagi berbohong · Dashboard Marketing terbukti SUDAH selesai
+
+## Temuan pertama: satu dari dua permintaan sudah selesai (ROADMAP basi)
+Dashboard Marketing (D) ternyata sudah ditutup sesi #16 — diukur ulang:
+`scripts/verify_fase_d_dashboard_marketing.py` HIJAU 8 invarian (pintu di sidebar Portal Marketing +
+angka dari SSOT siklus + total dihitung backend + lingkup toko per pemakai). Terbukti di layar:
+9 toko, target Rp 120jt, omzet Rp 4,4jt, anggaran 61,7%. **Entri ROADMAP-nya** yang salah, bukan
+produknya — sudah diperbaiki supaya sesi berikutnya tidak membangun ulang yang sudah jalan.
+
+## Masalah yang diukur (Fase G)
+Layar Penomoran Dokumen menampilkan pilihan **Otomatis/Manual** untuk **49** jenis dokumen, tetapi
+hanya **2** jalur tulis yang benar-benar memanggil `core.doc_number_policy.issue_number`. Untuk 47
+jenis lain: setelan TERSIMPAN, TAMPIL di layar, dan dokumennya tetap bernomor otomatis. Ditambah
+Kasbon & Pinjaman berbagi satu field/kunci (satu kebijakan untuk dua jenis dokumen), dan nomor yang
+lahir (`KSB-00001`) tidak mengikuti format yang tertulis di layar (`KSB-{YYYY}{MM}-{SEQ:5}`).
+
+## Yang dikerjakan
+- **6 jenis dokumen baru lewat satu pintu `issue_number`** (total 8): CMT-RCV · Invoice Maklon
+  (manual) · Invoice Piutang (AR) · Pengajuan Kasbon · Pengajuan Pinjaman Karyawan (kunci BARU) —
+  di samping SPP, PO Maklon, Roll Kain.
+- **Kunci registry baru** `dewi_kasbon_requests.request_number_pinjaman` (override
+  `collection`/`field`) ⇒ memindah kebijakan Kasbon tidak menyeret Pinjaman.
+- **Kejujuran setelan (inti sesi):** registry menandai `policy_enforced`; layar admin
+  menyembunyikan pilihan mode untuk jenis yang belum ditegakkan (badge kuning **"Otomatis saja"** +
+  alasannya), dan **API `PUT /api/admin/doc-numbering` juga MENOLAK** perubahan mode untuk jenis itu
+  — menyembunyikan di layar saja tidak cukup karena API bisa dipanggil langsung. Format tetap boleh
+  diubah untuk semua jenis. Hasil: **8 bisa diatur · 41 "Otomatis saja"**.
+- **Komponen bersama** `components/erp/docnum/DocNumberField.jsx` + hook `useDocNumberPolicy` +
+  helper `docNumberPayload`. Mode OTOMATIS ⇒ kolom terkunci menampilkan NOMOR BERIKUTNYA; mode
+  MANUAL ⇒ kolom wajib + pola & contoh ditulis. Dipasang di form Ajukan Kasbon/Pinjaman.
+
+## Bukti
+- Gate baru **INV-F25** `scripts/verify_fase_g2_penomoran_ditegakkan.py` → HIJAU 7 invarian
+  (G1 statik "yang mengaku ditegakkan benar-benar lewat issue_number" · G2 manual · G3 otomatis +
+  nomor mengikuti format owner · G4 jenis belum ditegakkan menolak mode tetapi format boleh ·
+  G5 Kasbon≠Pinjaman · G6 nomor kembar 409 · G7 layar memakai kebijakan), terpasang di `gate.sh`.
+- `bash scripts/gate.sh` → **43/43 PASS · 0 FAIL · 0 SKIP · HIJAU**.
+
+## Sisa
+41 jenis dokumen masih "Otomatis saja". Pola menyambungkannya sudah terbukti: tandai
+`policy_enforced` → ganti `gen_prefixed_number` jadi `issue_number(..., requested=...)` → pasang
+`<DocNumberField>` di form → daftarkan jalur tulisnya di `WRITE_PATHS` gate INV-F25.
+
 # [2026-08-17 #17] **FASE H-6b — FASE H DITUTUP 100%**: arus keluar Cutting punya DOKUMEN, stok tetap turun SEKALI
 
 ## Masalah yang diukur lebih dulu

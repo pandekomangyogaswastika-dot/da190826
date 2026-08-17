@@ -335,7 +335,12 @@ async def create_receipt(request: Request):
         if not body.get("cmt_name"):
             raise HTTPException(400, "cmt_name wajib diisi")
 
-    code = await _seq(db, "cmt_receipts", "CMT-RCV", "receipt_code")
+    # FASE G (sesi #18) — nomor penerimaan FG menghormati mode Otomatis/Manual yang
+    # disetel System Admin (Penomoran Dokumen). Dulu selalu otomatis, jadi togglenya
+    # tidak berpengaruh apa pun untuk dokumen ini.
+    from core.doc_number_policy import issue_number
+    code = await issue_number(db, "cmt_receipts.receipt_code",
+                              requested=(body.get("receipt_code") or ""))
     now_ts = _now()
     doc = {
         "id": _id(), "receipt_code": code,

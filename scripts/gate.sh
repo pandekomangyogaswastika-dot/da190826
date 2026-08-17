@@ -498,6 +498,20 @@ if [ $AUTH_READY -eq 1 ]; then
   run_gate "STOK/DOKUMEN — Arus keluar Cutting berdokumen, stok turun sekali (INV-F24)" \
            "python3 scripts/verify_fase_h6b_cutting_issue.py"
 
+  # ── INV-F25 (2026-08-17, Fase G lanjutan) — SETELAN PENOMORAN TIDAK BERBOHONG ─
+  # Terukur sebelum perbaikan: layar Penomoran Dokumen menampilkan pilihan
+  # Otomatis/Manual untuk 49 jenis dokumen, tetapi hanya DUA jalur tulis yang
+  # benar-benar memanggil `issue_number`. Untuk 47 jenis lain owner bisa memindah ke
+  # "Manual", setelan itu TERSIMPAN dan tampil di layar — lalu dokumennya tetap
+  # bernomor otomatis. Setelan yang tidak ditegakkan lebih buruk daripada setelan yang
+  # tidak ada. Ditambah: Kasbon & Pinjaman berbagi satu field sehingga satu kebijakan
+  # dipaksa untuk dua jenis dokumen, dan nomor yang lahir (`KSB-00001`) tidak mengikuti
+  # format yang tertulis di layar. Gate ini menahan: jenis yang MENGAKU ditegakkan
+  # padahal jalur tulisnya tidak, mode manual/otomatis yang tidak berlaku, nomor kembar,
+  # kebijakan dua dokumen yang tercampur, dan layar yang tidak membaca kebijakan.
+  run_gate "DATA — Setelan penomoran dokumen benar-benar ditegakkan (INV-F25)" \
+           "python3 scripts/verify_fase_g2_penomoran_ditegakkan.py"
+
 else
   for g in "state machine jurnal" "nomor dokumen kembar" "batas nilai AR/AP" \
            "RBAC/IDOR" "input jahat 4xx" "endpoint kritis" \
@@ -523,7 +537,8 @@ else
            "Nomor dokumen: mode auto/manual (INV-F21)" \
            "Gulungan kain lahir & wajib ditunjuk (INV-F22)" \
            "Surat jalan satu daftar + pintu lama (INV-F23)" \
-           "Arus keluar Cutting berdokumen (INV-F24)"; do
+           "Arus keluar Cutting berdokumen (INV-F24)" \
+           "Setelan penomoran ditegakkan (INV-F25)"; do
     skip_gate "$g" "backend/auth belum siap"
   done
 fi

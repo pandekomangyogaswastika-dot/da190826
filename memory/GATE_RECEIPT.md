@@ -3,7 +3,7 @@
 > Dihasilkan `scripts/gate.sh`. JANGAN edit manual.
 > "Selesai" hanya sah bila receipt HIJAU untuk cakupan yang TIDAK di-skip.
 
-- **Waktu:** 2026-08-17 07:22:34  ·  **Durasi:** 78s  ·  **Mode:** cepat
+- **Waktu:** 2026-08-17 13:37:29  ·  **Durasi:** 87s  ·  **Mode:** cepat
 - **Backend:** RUNNING · **Auth:** READY
 
 | Gate | Hasil |
@@ -43,6 +43,7 @@
 | STOK/PRODUK — Gulungan kain: lahir dari penerimaan, wajib ditunjuk saat dipotong (INV-F22) | PASS |
 | DOKUMEN/NAVIGASI — Surat jalan satu daftar lintas sumber + pintu lama tak kosong (INV-F23) | PASS |
 | STOK/DOKUMEN — Arus keluar Cutting berdokumen, stok turun sekali (INV-F24) | PASS |
+| DATA — Setelan penomoran dokumen benar-benar ditegakkan (INV-F25) | PASS |
 | FITUR MATI — handler tergabung / kode setelah return | PASS |
 | FITUR MATI — panggilan FE ke endpoint yang tak ada | PASS |
 | NAVIGASI — menu hantu / duplikat / kedalaman | PASS |

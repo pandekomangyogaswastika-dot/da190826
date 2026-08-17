@@ -31,10 +31,21 @@
   `cmt-monitor`. Gate: **INV-F23** (S7/S8 menolak alias yang menunjuk modul berkoleksi kosong).
 - **F3/F4 (P1)** Rapikan 5 PDF tersering (SPP · Invoice · Slip Gaji · Picklist · SJ Vendor) ke pola
   `_pdf_data_table` (auto-wrap + penuh lebar halaman) seperti Surat Jalan Buyer di Fase F1/F2.
-- **G (P1)** Penomoran dokumen **Auto/Manual per jenis dokumen** yang bisa diatur System Admin
-  (SPP · CMT-RCV · SJ-RWK · Invoice · Kasbon).
-- **D (P0)** Dashboard Marketing: komponennya ada tapi **tidak pernah didaftarkan di sidebar**
-  mana pun, dan angkanya belum dari data hidup.
+- ⚠️ **G (SEPARUH SELESAI 2026-08-17 #18)** Penomoran dokumen **Auto/Manual per jenis dokumen**
+  yang bisa diatur System Admin. **8 jenis SUDAH ditegakkan**: SPP (PO Produksi) · PO Maklon ·
+  Roll Kain · Penerimaan FG dari CMT (CMT-RCV) · Invoice Maklon (manual) · Invoice Piutang (AR) ·
+  Pengajuan Kasbon · Pengajuan Pinjaman Karyawan. **41 jenis lain masih "Otomatis saja"** — dan
+  layar+API kini MENGATAKANNYA terang-terangan (badge kuning + `PUT` mode ditolak) supaya setelan
+  tidak berbohong. Gate: **INV-F21** (SPP) + **INV-F25** (penegakan + kejujuran setelan).
+  Menyambungkan sisanya: tandai `policy_enforced` → `issue_number(..., requested=...)` di jalur
+  tulis → pasang `<DocNumberField>` di form → daftarkan di `WRITE_PATHS` INV-F25.
+- ✅ **D (SELESAI 2026-08-16 #16)** Dashboard Marketing: pintunya ada di sidebar Portal Marketing
+  (Ringkasan & Laporan) dan angkanya **dari data hidup** — SSOT siklus marketing
+  (`/api/marketing/cycle/overview`): target vs omzet, anggaran terpakai, ROAS/ROI (hanya diklaim
+  sahih bila cakupan HPP ≥ 80%), papan "perlu perhatian", dan lingkup toko per pemakai.
+  Total dihitung BACKEND (layar tidak menjumlah ulang). Gate: **INV-F20** (8 invarian).
+  *(Entri lama "D (P0) belum didaftarkan di sidebar" sudah BASI — diperbaiki 2026-08-17 #18
+  setelah diukur ulang: INV-F20 D1–D8 hijau.)*
 
 ## P0 (menunggu owner)
 - **Kunci Anthropic**: isi `ANTHROPIC_API_KEY` di `backend/.env`. Sampai diisi, SEMUA fitur AI

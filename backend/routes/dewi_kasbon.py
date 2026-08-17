@@ -25,7 +25,7 @@ API:
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from motor.motor_asyncio import AsyncIOMotorDatabase
 from database import get_db
-from utils.counters import gen_prefixed_number
+from core.doc_number_policy import issue_number  # FASE G — satu pintu penomoran
 from auth import require_auth
 from datetime import datetime, timezone, date
 from typing import Optional
@@ -152,9 +152,21 @@ async def submit_kasbon_request(
     emp_email = (emp or {}).get("email") or user.get("email", "")
     actual_emp_id = (emp or {}).get("id") or (emp or {}).get("employee_id") or employee_id
 
-    # Auto request number (RC-5 fix: atomic race-safe numbering, was count_documents()+1)
-    prefix = "KSB" if req_type == "kasbon" else "PIN"
-    req_number = await gen_prefixed_number(db, "dewi_kasbon_requests", "request_number", f"{prefix}-", 5)
+    # ── FASE G (sesi #18) — KEBIJAKAN PENOMORAN DITEGAKKAN ────────────────────
+    # Sebelum ini nomor SELALU dibuat otomatis (`KSB-00001`/`PIN-00001`) sehingga
+    # setelan "Otomatis/Manual" di Administrasi Sistem → Penomoran Dokumen tidak
+    # berpengaruh apa pun untuk dokumen ini — setelan yang tidak ditegakkan adalah
+    # setelan yang BERBOHONG. Sekarang satu pintu `issue_number`:
+    #   · mode OTOMATIS → nomor dibuat mengikuti FORMAT yang disetel owner, dan
+    #     nomor ketikan DITOLAK (bukan diabaikan diam-diam);
+    #   · mode MANUAL  → nomor wajib diisi DAN wajib mengikuti pola formatnya.
+    # Kasbon & Pinjaman memakai KUNCI BERBEDA walau satu koleksi, supaya memindah
+    # kebijakan kasbon tidak ikut memaksa pinjaman.
+    req_number = await issue_number(
+        db,
+        "dewi_kasbon_requests.request_number" if req_type == "kasbon"
+        else "dewi_kasbon_requests.request_number_pinjaman",
+        requested=(body.get("request_number") or ""))
 
     # Documents: [{name, data, mime_type}] — base64 encoded
     documents = body.get("documents") or []

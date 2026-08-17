@@ -7500,3 +7500,89 @@ Excel/PDF, kirim reminder.
          cleanup INV-F22 + sweeper `cleanup_uji_h5_h6.py` + invarian BARU **C14**.
       HASIL AKHIR: `bash scripts/gate.sh` → **42/42 PASS · 0 FAIL · 0 SKIP · VERDICT HIJAU**
       (receipt: `memory/GATE_RECEIPT.md`), INV-F24 HIJAU **14 invarian**, POC 77/77.
+
+#====================================================================================================
+# SESI #18 (2026-08-17) — FASE G DITEGAKKAN + Dashboard Marketing terbukti sudah selesai
+#====================================================================================================
+## user_problem_statement: "(1) Beri System Admin pengaturan Auto/Manual per jenis dokumen untuk SPP, Invoice, Kasbon. (2) Daftarkan dashboard marketing ke sidebar + sambungkan angkanya ke data hidup."
+
+## backend:
+  - task: "Kebijakan penomoran DITEGAKKAN untuk 6 jenis dokumen baru (total 8)"
+    implemented: true
+    working: true
+    file: "backend/data/doc_number_registry.py, routes/dewi_kasbon.py, routes/dewi_cmt_packing.py, routes/dewi_maklon_billing.py, routes/rahaza_finance.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        -working: true
+        -agent: "main"
+        -comment: |
+          CMT-RCV · Invoice Maklon (manual) · Invoice Piutang (AR) · Pengajuan Kasbon ·
+          Pengajuan Pinjaman Karyawan (kunci BARU `request_number_pinjaman`) kini lewat SATU pintu
+          `core.doc_number_policy.issue_number`. Mode OTOMATIS menolak nomor ketikan + nomor mengikuti
+          FORMAT owner (dulu `KSB-00001`, sekarang `KSB-202608-00001` sesuai yang tertulis di layar).
+          Mode MANUAL: kosong ditolak, pola bebas ditolak, nomor kembar 409.
+  - task: "Setelan tidak boleh berbohong — API menolak mode untuk jenis yang belum ditegakkan"
+    implemented: true
+    working: true
+    file: "backend/routes/doc_numbering.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        -working: true
+        -agent: "main"
+        -comment: |
+          `PUT /api/admin/doc-numbering` MENOLAK perubahan mode untuk jenis tanpa `policy_enforced`
+          (FORMAT tetap boleh diubah). Menyembunyikan pilihan di layar saja tidak cukup — API bisa
+          dipanggil langsung.
+
+## frontend:
+  - task: "Komponen bersama DocNumberField + form Kasbon mengikuti kebijakan"
+    implemented: true
+    working: true
+    file: "frontend/src/components/erp/docnum/DocNumberField.jsx, KasbonStaffModule.jsx"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        -working: true
+        -agent: "main"
+        -comment: |
+          Bundel statis SUDAH di-rebuild. Mode OTOMATIS ⇒ kolom nomor terkunci menampilkan NOMOR
+          BERIKUTNYA; mode MANUAL ⇒ kolom wajib + pola & contoh. Tab Kasbon/Pinjaman menukar
+          kebijakan (dua jenis dokumen, dua kunci).
+  - task: "Layar Penomoran Dokumen jujur: 8 bisa diatur, 41 'Otomatis saja'"
+    implemented: true
+    working: true
+    file: "frontend/src/components/erp/DocNumberingModule.jsx"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        -working: true
+        -agent: "main"
+        -comment: "Badge kuning 'Otomatis saja' + alasan untuk jenis yang belum ditegakkan."
+
+## metadata:
+  created_by: "main_agent"
+  version: "1.6"
+  test_sequence: 54
+  run_ui: true
+
+## agent_communication
+    -agent: "main"
+    -message: |
+      TEMUAN PENTING: permintaan (2) Dashboard Marketing TERNYATA SUDAH SELESAI sejak sesi #16 —
+      `scripts/verify_fase_d_dashboard_marketing.py` HIJAU 8 invarian (pintu di sidebar + angka dari
+      SSOT siklus). Yang salah adalah entri ROADMAP-nya (sudah diperbaiki). Terbukti di layar:
+      9 toko · target Rp 120jt · omzet Rp 4,4jt · anggaran 61,7% · ROAS 0,36× · 6 merah.
+      BUKTI SESI INI: gate baru INV-F25 HIJAU 7 invarian · `bash scripts/gate.sh` 43/43 PASS ·
+      0 FAIL · 0 SKIP · HIJAU · agen uji 11 lulus / 0 bug UI / 0 bug backend.
+    -agent: "testing"
+    -message: |
+      11 uji lulus, 0 bug UI, 0 bug backend. Satu catatan LOW: kartu dashboard marketing "tidak
+      terlihat jelas" saat uji — main agent sudah membuktikan sebaliknya lewat screenshot (keempat
+      kartu terisi: TARGET VS OMZET 3.7%, ANGGARAN 61.7%, ROAS 0.36×, PERLU PERHATIAN 6 merah),
+      jadi ini artefak viewport/timing pada uji, bukan cacat produk.

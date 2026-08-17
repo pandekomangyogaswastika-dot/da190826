@@ -117,7 +117,20 @@ async def _require_fin(request: Request):
     raise HTTPException(403, "Forbidden: butuh permission finance.")
 
 
-async def _gen_number(db, coll, prefix):
+async def _gen_number(db, coll, prefix, requested: str = ""):
+    """Nomor dokumen keuangan.
+
+    FASE G (sesi #18): untuk jenis dokumen yang KEBIJAKANNYA sudah ditegakkan
+    (`policy_enforced` di `data/doc_number_registry.py`) nomor lewat SATU pintu
+    `core.doc_number_policy.issue_number` supaya mode OTOMATIS/MANUAL yang disetel
+    System Admin benar-benar berlaku. Jenis lain tetap seperti sebelumnya —
+    lebih baik jujur "belum ditegakkan" daripada menegakkan separuh jalan.
+    """
+    _POLICY_KEYS = {"rahaza_ar_invoices": "rahaza_ar_invoices.invoice_number"}
+    key = _POLICY_KEYS.get(coll)
+    if key:
+        from core.doc_number_policy import issue_number
+        return await issue_number(db, key, requested=(requested or "").strip())
     today = date.today().strftime("%Y%m%d")
     p = f"{prefix}-{today}-"
     # RC-5 fix: atomic race-safe numbering (was count_documents()+1)
@@ -225,7 +238,8 @@ async def create_ar(request: Request):
     discount_amount = _to_num(body.get("discount_amount"), "discount_amount")  # Phase 9C
     _validate_tax_discount(tax_pct, discount_amount, subtotal, tax)
     total = round(subtotal + tax - discount_amount)
-    invoice_number = await _gen_number(db, "rahaza_ar_invoices", "AR")
+    invoice_number = await _gen_number(db, "rahaza_ar_invoices", "AR",
+                                       requested=(body.get("invoice_number") or ""))
     doc = {
         "id": _uid(), "invoice_number": invoice_number,
         "customer_id": customer_id,

@@ -12,6 +12,9 @@ import {
 import { formatRupiah } from '@/lib/format';
 import ExportCsvButton from '@/components/ui/export-csv-button';
 import PaginationLite, { useClientPagination } from '@/components/ui/pagination-lite';
+// FASE G (sesi #18) — kolom nomor dokumen yang MENGIKUTI kebijakan Otomatis/Manual
+// yang disetel System Admin. Tanpa ini layar & backend bisa berbeda pendapat.
+import DocNumberField, { useDocNumberPolicy, docNumberPayload } from './docnum/DocNumberField';
 
 const KASBONSTAFF_VIEW_KEY = 'kasbon_staff_view';
 const CSV_HEAD = ['No. Pengajuan', 'Jenis', 'Keperluan', 'Status', 'Jumlah',
@@ -135,7 +138,15 @@ function RequestCard({ req, onRefresh }) {
 function RequestForm({ onSuccess, onClose }) {
   const [form, setForm] = useState({
     type: 'kasbon', amount: '', purpose: '', notes: '', installment_count: 1,
+    request_number: '',
   });
+  // FASE G — kasbon & pinjaman adalah DUA jenis dokumen dengan kebijakan sendiri.
+  const numPolicy = useDocNumberPolicy(
+    form.type === 'kasbon'
+      ? 'dewi_kasbon_requests.request_number'
+      : 'dewi_kasbon_requests.request_number_pinjaman',
+    localStorage.getItem('erp_token'),
+  );
   const [docs, setDocs] = useState([]);
   const [saving, setSaving] = useState(false);
 
@@ -158,12 +169,26 @@ function RequestForm({ onSuccess, onClose }) {
   const handleSubmit = async () => {
     if (!form.purpose.trim()) { toast.error('Keperluan harus diisi'); return; }
     if (!form.amount || Number(form.amount) <= 0) { toast.error('Jumlah harus lebih dari 0'); return; }
+    // FASE G — mode MANUAL: nomor wajib diisi di layar, jangan biarkan backend
+    // yang menolak setelah semua kolom lain diisi.
+    if (numPolicy?.mode === 'manual' && !(form.request_number || '').trim()) {
+      toast.error(`Nomor ${numPolicy.label} wajib diisi (pola ${numPolicy.format})`);
+      return;
+    }
     setSaving(true);
     try {
+      const { request_number: _rn, ...rest } = form;
       const r = await fetch(`${API}/api/dewi/kasbon/requests`, {
         method: 'POST',
         headers: authH(),
-        body: JSON.stringify({ ...form, amount: Number(form.amount), installment_count: Number(form.installment_count), documents: docs }),
+        body: JSON.stringify({
+          ...rest,
+          amount: Number(form.amount),
+          installment_count: Number(form.installment_count),
+          documents: docs,
+          // nomor HANYA dikirim bila kebijakannya manual (mode otomatis MENOLAK ketikan)
+          ...docNumberPayload(numPolicy, 'request_number', form.request_number),
+        }),
       });
       const d = await r.json();
       if (d.ok) { toast.success('Pengajuan berhasil dikirim'); onSuccess(); }
@@ -190,6 +215,15 @@ function RequestForm({ onSuccess, onClose }) {
               </button>
             ))}
           </div>
+
+          {/* FASE G (sesi #18) — nomor pengajuan mengikuti kebijakan Otomatis/Manual
+              yang disetel System Admin. Kasbon & Pinjaman punya kebijakan sendiri. */}
+          <DocNumberField
+            policy={numPolicy}
+            value={form.request_number}
+            onChange={(v) => setForm(p => ({ ...p, request_number: v }))}
+            testId="kasbon-docnum"
+          />
 
           {/* Amount */}
           <div>

@@ -4320,7 +4320,7 @@
   {
    "file": "frontend/src/components/erp/DocNumberingModule.jsx",
    "name": "DocNumberingModule.jsx",
-   "lines": 284,
+   "lines": 305,
    "cards": 7,
    "grids": 1,
    "tables": 0,
@@ -4334,7 +4334,7 @@
     "toggle": false
    },
    "via": [],
-   "fields_used": 18,
+   "fields_used": 19,
    "apis": [
     "api/admin/doc-numbering"
    ],
@@ -4733,7 +4733,7 @@
   {
    "file": "frontend/src/components/erp/KasbonStaffModule.jsx",
    "name": "KasbonStaffModule.jsx",
-   "lines": 471,
+   "lines": 505,
    "cards": 0,
    "grids": 2,
    "tables": 1,

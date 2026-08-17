@@ -120,6 +120,21 @@ async def save_format(request: Request, data: FormatIn):
         raise HTTPException(404, f"Jenis dokumen '{data.key}' tidak dikenal.")
     if data.mode is not None and data.mode not in MODES:
         raise HTTPException(400, f"mode harus salah satu dari {MODES}.")
+    # ── SESI #18 — SETELAN TIDAK BOLEH BERBOHONG ─────────────────────────────
+    # Mode OTOMATIS/MANUAL hanya berarti untuk jenis dokumen yang JALUR TULISNYA
+    # memanggil `core.doc_number_policy.issue_number` (ditandai `policy_enforced`).
+    # Untuk jenis lain, menyimpan mode="manual" akan tersimpan RAPI di basis data
+    # dan tampil di layar, tetapi dokumennya tetap bernomor otomatis — owner
+    # mengira sudah mengubah sesuatu padahal tidak. Ditolak dengan menyebut
+    # jalan keluarnya, bukan diterima diam-diam.
+    if (data.mode is not None and data.mode != (entry.get("default_mode") or "auto")
+            and not entry.get("policy_enforced")):
+        raise HTTPException(400, (
+            f"Mode penomoran untuk '{entry['label']}' belum bisa diubah: jalur dokumennya "
+            "masih membuat nomor otomatis, jadi setelan manual tidak akan berlaku. "
+            "Yang SUDAH bisa diatur: PO Produksi (SPP), PO Maklon, Roll Kain, Penerimaan FG "
+            "dari CMT, Invoice Maklon, Invoice Piutang (AR), Pengajuan Kasbon, dan Pengajuan "
+            "Pinjaman Karyawan. FORMAT dokumen ini tetap bisa diubah."))
 
     db = get_db()
     cur = await db[CONFIG_COLL].find_one({"key": data.key}, {"_id": 0}) or {}

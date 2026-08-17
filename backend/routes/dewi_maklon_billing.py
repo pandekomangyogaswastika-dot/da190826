@@ -16,7 +16,6 @@ from database import get_db
 from auth import require_auth
 from routes.dewi_system_config import get_config_value
 from routes._maklon_adapter import find_maklon_record, po_to_legacy_order
-from utils.counters import next_counter, gen_prefixed_number
 from utils.data_quality import SkipTracker
 import uuid
 
@@ -37,6 +36,9 @@ class InvoiceGenerateIn(BaseModel):
     payment_terms: Optional[str] = None
     notes: Optional[str] = None
     issue_date: Optional[str] = None  # YYYY-MM-DD
+    # FASE G (sesi #18) — nomor invoice ketikan; hanya sah bila kebijakan penomoran
+    # jenis dokumen ini disetel MANUAL (kalau OTOMATIS, nomor ketikan ditolak).
+    invoice_number: Optional[str] = None
 
 class InvoiceUpdateIn(BaseModel):
     notes: Optional[str] = None
@@ -77,12 +79,17 @@ def _clean(doc: dict) -> dict:
     doc.pop('_id', None)
     return doc
 
-async def _next_invoice_number(db, prefix: str) -> str:
+async def _next_invoice_number(db, prefix: str, requested: str = '') -> str:
     """Nomor invoice maklon manual — race-safe & formatnya bisa diatur owner
-    (kunci `dewi_maklon_invoices.invoice_number`, token {PREFIX})."""
-    year = datetime.now(timezone.utc).year
-    return await gen_prefixed_number(db, 'dewi_maklon_invoices', 'invoice_number',
-                                     f'{prefix}-{year}-', 4, ctx={'PREFIX': prefix})
+    (kunci `dewi_maklon_invoices.invoice_number`, token {PREFIX}).
+
+    FASE G (sesi #18): lewat `issue_number` supaya mode OTOMATIS/MANUAL yang disetel
+    System Admin benar-benar DITEGAKKAN (mode manual = nomor diketik tetapi wajib
+    mengikuti polanya; mode otomatis MENOLAK nomor ketikan, bukan mengabaikannya).
+    """
+    from core.doc_number_policy import issue_number
+    return await issue_number(db, 'dewi_maklon_invoices.invoice_number',
+                              ctx={'PREFIX': prefix}, requested=requested)
 
 def _payment_term_days(term: str) -> int:
     mapping = {'net_7': 7, 'net_14': 14, 'net_30': 30, 'net_60': 60}
@@ -248,7 +255,8 @@ async def generate_invoice(payload: InvoiceGenerateIn, user: dict = Depends(requ
         'line_total': round(float(order.get('price_per_pcs', 0) or 0) * int(order.get('qty_ordered', 0) or 0), 2),
     }
 
-    invoice_number = await _next_invoice_number(db, prefix)
+    invoice_number = await _next_invoice_number(db, prefix,
+                                                requested=(payload.invoice_number or ''))
     now = datetime.now(timezone.utc)
     doc = {
         'id': str(uuid.uuid4()),
