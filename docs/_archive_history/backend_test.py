@@ -9,7 +9,7 @@ import sys
 from datetime import datetime
 
 # Backend URL from environment
-BACKEND_URL = "https://maklon-dispatch-fix.preview.emergentagent.com/api"
+BACKEND_URL = "https://smart-preview-pdf.preview.emergentagent.com/api"
 
 # Test credentials
 ADMIN_EMAIL = "admin@garment.com"

@@ -1028,3 +1028,87 @@ Urutan berdasarkan kerusakan data (P0 dulu):
 > Catatan: fase huruf D/E/F/G/H di dokumen ini adalah hasil analisis 2026-08-15.
 > **E, F1/F2, H-1 (sesi #13) dan H-2 · H-3 · H-4/H-9 (sesi #14) SUDAH SELESAI.**
 > Yang masih BACKLOG: D · F3/F4 · G · H-5 · H-6 · H-7 · H-8 — rinciannya di `memory/ROADMAP.md`.
+
+---
+
+# SESI 2026-08-17/18 (#19) — **PENOMORAN LANJUTAN + EDITOR PDF SATU PINTU**
+
+> Sumber permintaan: `/app/memory/PERMINTAAN_OWNER_PDF_EDITOR.md` (dicatat verbatim akhir sesi #18).
+> Keputusan owner di awal sesi #19 (dikonfirmasi lewat pertanyaan):
+> 1. Urutan kerja **0 → 4** (penomoran dulu sebagai pemanasan).
+> 2. Pratinjau = **PDF ASLI** dari backend di iframe (WYSIWYG, debounce ±1 detik).
+> 3. Logo = **base64 di MongoDB** (tanpa layanan luar).
+> 4. Struktur setelan = **satu template GLOBAL + override per jenis dokumen**.
+> 5. **Dua layar lama disatukan jadi SATU menu**; setelan lama dimigrasikan otomatis.
+
+## FASE 0 — Penomoran Otomatis/Manual untuk 3 jenis lagi (Status: COMPLETED)
+Pola yang diulang (terbukti sesi #18, 4 langkah per jenis):
+`policy_enforced` di `backend/data/doc_number_registry.py` → ganti generator jadi
+`issue_number(db, KEY, requested=…)` di jalur tulisnya → pasang `<DocNumberField>` di formnya →
+daftarkan jalur tulisnya di `WRITE_PATHS` gate `scripts/verify_fase_g2_penomoran_ditegakkan.py`.
+
+| Jenis | Kunci | Jalur tulis | Form |
+|---|---|---|---|
+| Surat Jalan Gudang | `wh_delivery_notes.sj_number` | `backend/routes/wms_delivery_notes.py` (`create_sj`) | `WMSDeliveryNotesModule.jsx` |
+| PR Pengadaan | `dewi_procurement_requests.request_number` | `backend/routes/dewi_procurement.py` (`create_request`) | `ProcurementRequestModule.jsx` |
+| Jurnal Umum | `rahaza_journal_entries.je_number` | `backend/routes/rahaza_journals.py` (`create_journal`) | `RahazaJournalEntryModule.jsx` |
+
+Catatan penting yang ditemukan saat membaca kode:
+- Gate G2 memakai `NOT_ENFORCED_KEY = "rahaza_journal_entries.je_number"` untuk menguji G4.
+  Karena jurnal kini DITEGAKKAN, kunci uji itu **harus dipindah** ke jenis lain yang belum
+  ditegakkan (dipilih `rahaza_credit_notes.cn_number`) — kalau tidak, G4 akan merah karena
+  alasan yang salah.
+- Jalur nomor yang **lahir tanpa manusia** tetap otomatis dan itu didokumentasikan di `catatan`
+  registry: SJ-CMT dari `wms_cmt_dispatches.execute_dispatch`, dan jurnal hasil posting otomatis
+  dari `rahaza_posting.py`. Mode MANUAL hanya berlaku untuk jalur yang diketik orang.
+- Pesan penolakan mode di `routes/doc_numbering.py` sebelumnya menyebut daftar jenis
+  ditegakkan secara HARDCODE → dibuat dinamis dari registry supaya tidak pernah basi.
+
+## FASE 1 — Satukan dua layar konfigurasi PDF (Status: COMPLETED)
+Yang diukur sekarang: `PDFConfigModule.jsx` (menu `mgmt-pdf`, backend `operations_pdf_configs.py`)
+dan `PdfDocSettingsModule.jsx` (backend `pdf_document_settings.py`) = dua layar, dua koleksi,
+dua UI/UX. Target: SATU layar + SATU koleksi (`pdf_templates`) + migrasi setelan lama.
+
+## FASE 2 — Editor template (Status: COMPLETED)
+Kop surat (nama PT, alamat, telp, NPWP, logo unggah, tata letak) · kolom tabel (show/hide,
+urutan, tambah kolom) · blok tanda tangan ganda (subject atas / ruang ttd / nama bawah dikosongkan).
+
+## FASE 3 — Pratinjau PDF di samping editor (Status: COMPLETED)
+Endpoint pratinjau yang merender PDF dari template yang SEDANG diedit (tanpa menyimpan),
+ditampilkan di iframe sebelah editor, debounce.
+
+## FASE 4 — 5 PDF tersering + gate baru (Status: COMPLETED)
+SPP · Invoice · Slip Gaji · Picklist · SJ Vendor ke pola `_pdf_data_table`; gate baru (INV-F26)
+mengukur: kop terisi dari konfigurasi, show/hide + urutan kolom benar-benar berlaku di PDF,
+jumlah blok tanda tangan sesuai setelan, 0 tumpang tindih (pymupdf). Lalu `bash scripts/gate.sh`
+harus tetap HIJAU seluruhnya.
+
+
+
+## HASIL SESI #19 (ringkas — rinciannya di `memory/SESI19_PDF_TEMPLATE.md`)
+- FASE 0 ✅ Penomoran Otomatis/Manual ditegakkan untuk **Surat Jalan Gudang**,
+  **PR Pengadaan**, **Jurnal Umum** (+ `<DocNumberField>` di ketiga formnya).
+  Gate INV-F25 kini 8 invarian (G1–G8, G8 = bukti pada dokumen sungguhan).
+  Cacat ikutan yang diperbaiki: pola nomor manual menolak tanda hubung (mode MANUAL
+  Surat Jalan mustahil dipakai), pratinjau nomor `TIP/...` yang tidak pernah lahir,
+  daftar jenis ditegakkan yang hardcode di pesan penolakan, dan nomor jurnal manual
+  yang diganti diam-diam saat bentrok.
+- FASE 1–3 ✅ SATU layar **"PDF & Kop Surat"** (`erp/pdf/PdfTemplateStudio.jsx`)
+  dengan **pratinjau PDF di samping** (mode Gambar/PDF, debounce 800 ms), SATU koleksi
+  `pdf_templates` (global + override per dokumen), katalog gabungan 19 jenis dokumen
+  (`data/pdf_doc_registry.py`), logo base64 (maks 700 KB) — dua tab PDF lama dilebur
+  jadi satu; deep-link `mgmt-pdf` mengarah ke tab hub (satu isi, satu pintu).
+- FASE 4 ✅ Template diterapkan ke SPP, SJ Vendor, Dispatch Buyer, **Pick List
+  (ditulis ulang — dulu tanpa kop)**, **Surat Jalan Gudang (ditulis ulang dari canvas)**,
+  Invoice Maklon, dan kop Slip Gaji. Gate baru **INV-F26** (P1–P8) mengukur dari PDF
+  jadi: kop+logo dari konfigurasi, urutan/hide/tambah kolom berlaku, 4 blok TTD
+  tercetak, 0 tumpang tindih, tabel ≥97% lebar konten, logo divalidasi, warisan satu sumber.
+- Bonus yang ikut dibereskan: **10 laporan** (Laporan Produksi + 9 `report-*`) kini
+  memakai kop template DAN tabel `_pdf_data_table` — dulu lebar kolomnya angka ajaib
+  (680/445 pt) dengan STRING mentah tanpa word-wrap; sekarang 0 tumpang tindih & 100%
+  lebar konten. Rekap Surat Jalan juga ikut template (TOTAL per KUNCI, bukan indeks).
+- Kejujuran layar: 2 jenis yang kolomnya BELUM bisa diatur (Slip Gaji A5, Panduan
+  Produksi) dinyatakan terus-terangan — penyunting kolomnya disembunyikan + pratinjaunya
+  memberi catatan. Dijaga invarian P9 gate INV-F26.
+- `bash scripts/gate.sh` → **VERDICT HIJAU**: 44/44 gate PASS · 0 FAIL · 0 SKIP
+  (termasuk INV-F17, INV-F25 8 invarian, INV-F26 9 invarian).

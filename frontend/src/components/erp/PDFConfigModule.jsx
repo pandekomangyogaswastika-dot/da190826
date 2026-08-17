@@ -1,3 +1,16 @@
+/**
+ * ⚠️ LAYAR PENSIUN (SESI #19, 2026-08-18) — JANGAN DIPASANG LAGI KE MENU.
+ *
+ * Digantikan `erp/pdf/PdfTemplateStudio.jsx` ("PDF & Kop Surat"): satu layar untuk
+ * kop surat (logo & identitas PT), kolom tabel (tampil/urutan/tambah), blok tanda
+ * tangan, footer, PLUS pratinjau PDF di sampingnya. Keluhan pemilik yang membuat
+ * layar ini dipensiunkan: "cek ada dua halaman berbeda ui ux-nya jelas" —
+ * berkas ini adalah salah satu dari dua halaman itu.
+ *
+ * Berkas TIDAK dihapus supaya riwayat & pola lamanya bisa dibaca, tetapi tidak
+ * dirujuk `moduleRegistry.js` maupun hub mana pun. Penjaga INV-F26 (P1) akan MERAH
+ * bila berkas ini dipasang kembali sebagai tab/menu.
+ */
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   FileDown, Plus, Trash2, Star, Check, X, Settings, Eye, Download,

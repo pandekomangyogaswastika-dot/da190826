@@ -324,6 +324,18 @@ async def delete_picklist(picklist_id: str, request: Request):
 
 @router.get("/{picklist_id}/pdf")
 async def picklist_pdf(picklist_id: str, request: Request):
+    """Pick List cetak — SESI #19: memakai TEMPLATE PDF pemilik.
+
+    Yang terukur sebelum ini: Pick List sama sekali TIDAK punya kop surat (nama PT
+    pun tidak ada, padahal kertas ini dibawa keluar rak dan sering ikut ke tangan
+    ekspedisi), blok tanda tangannya dipaku tiga ("Picker/Checker/Delivered to")
+    tanpa bisa diubah, dan lebar kolomnya milimeter tetap: 174 mm dari 186 mm lebar
+    konten ⇒ tabel tidak penuh halaman.
+
+    Sekarang kop, kolom (tampil/urutan/lebar/kolom tambahan), blok tanda tangan, dan
+    footer datang dari layar "PDF & Kop Surat" — dengan generator tabel yang sama
+    (`_pdf_data_table`) yang dijaga penjaga anti-tumpang-tindih INV-F17.
+    """
     await require_auth(request)
     db = get_db()
     doc = await db.wh_picklists.find_one({"picklist_id": picklist_id}, {"_id": 0})
@@ -331,115 +343,72 @@ async def picklist_pdf(picklist_id: str, request: Request):
         raise HTTPException(404, "Pick list tidak ditemukan.")
 
     try:
-        from reportlab.lib.pagesizes import A4
-        from reportlab.lib.units import mm
-        from reportlab.lib import colors
-        from reportlab.lib.styles import ParagraphStyle
-        from reportlab.lib.enums import TA_CENTER, TA_LEFT
-        from reportlab.platypus import (
-            SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle,
-        )
+        from core.pdf_template import (footer_flowables, header_flowables,
+                                       signature_flowables)
+        from routes.operations_pdf_helpers import (CONTENT_W_PORTRAIT, _build_pdf,
+                                                   _pdf_data_table, tpl_table_parts)
+        from utils.pdf_common import get_company_profile
     except ImportError:
         raise HTTPException(500, "reportlab belum terinstall.")
 
-    buf = io.BytesIO()
-    pdf = SimpleDocTemplate(buf, pagesize=A4,
-        leftMargin=12 * mm, rightMargin=12 * mm,
-        topMargin=12 * mm, bottomMargin=12 * mm)
-
-    NAVY = colors.HexColor("#1a2a4a")
-    TEAL = colors.HexColor("#0f6b8e")
-    LIGHT = colors.HexColor("#f0f6fa")
-    GREY = colors.HexColor("#6b7280")
-
-    h1  = ParagraphStyle("h1",  fontSize=14, fontName="Helvetica-Bold", textColor=NAVY, leading=17)
-    sub = ParagraphStyle("sub", fontSize=9,  fontName="Helvetica",      textColor=GREY, leading=12)
-    hdr = ParagraphStyle("hdr", fontSize=8,  fontName="Helvetica-Bold", textColor=colors.white, leading=10, alignment=TA_CENTER)
-    cell= ParagraphStyle("cell",fontSize=8,  fontName="Helvetica",      textColor=colors.black, leading=10)
-    cellb=ParagraphStyle("cb",  fontSize=8,  fontName="Helvetica-Bold", textColor=NAVY, leading=10)
-    mono= ParagraphStyle("mono",fontSize=8,  fontName="Courier-Bold",   textColor=TEAL, leading=10)
-
-    # Header
     items = doc.get("items") or []
     created_raw = doc.get("created_at") or ""
-    if isinstance(created_raw, datetime):
-        created_str = created_raw.isoformat()
-    else:
-        created_str = str(created_raw)
-    header_info = Table([[
-        Paragraph(f"<b>PICK LIST</b><br/><font size='8' color='#6b7280'>{doc.get('ref_number','')}</font>", h1),
-        Paragraph(
-            f"Sumber: {doc.get('source_type','-')} · {doc.get('source_ref','-')}<br/>"
-            f"Dibuat: {created_str[:19].replace('T',' ')}<br/>"
-            f"Operator: {doc.get('assignee_name') or '—'}<br/>"
-            f"Total: {len(items)} item · {doc.get('total_qty', 0)} pcs",
-            sub,
-        ),
-    ]], colWidths=[85 * mm, 100 * mm])
-    header_info.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "TOP")]))
+    created_str = (created_raw.isoformat() if isinstance(created_raw, datetime)
+                   else str(created_raw))
 
-    # Pick table
-    rows = [[
-        Paragraph("#", hdr),
-        Paragraph("Barcode Posisi", hdr),
-        Paragraph("Lokasi", hdr),
-        Paragraph("Kode Material", hdr),
-        Paragraph("Nama Material", hdr),
-        Paragraph("Qty", hdr),
-        Paragraph("Unit", hdr),
-        Paragraph("Pick ✓", hdr),
-    ]]
+    all_keys = ['no', 'position_barcode', 'location', 'material_code', 'material_name',
+                'qty', 'unit', 'checkbox']
+    all_headers = ['No', 'Barcode Posisi', 'Lokasi', 'Kode Material', 'Nama Material',
+                   'Qty Ambil', 'Satuan', 'Pick']
+    rows = []
     for i, it in enumerate(items, 1):
-        is_short = it.get("status") == "short"
-        loc = "—" if is_short else f"{it.get('building_code','')}/{it.get('zone_code','')}/{it.get('rack_code','')}"
+        kurang = it.get("status") == "short"
+        lokasi = "—" if kurang else (
+            f"{it.get('building_code','')}/{it.get('zone_code','')}/{it.get('rack_code','')}")
         rows.append([
-            Paragraph(str(i), cell),
-            Paragraph(it.get("position_barcode") or "—", mono),
-            Paragraph(loc, cell),
-            Paragraph(it.get("material_code", ""), cellb),
-            Paragraph(it.get("material_name", ""), cell),
-            Paragraph(f"<b>{it.get('qty_to_pick', 0)}</b>" + (" ⚠" if is_short else ""), cellb),
-            Paragraph(it.get("unit", ""), cell),
-            Paragraph("☐", cell),
+            i, it.get("position_barcode") or "—", lokasi,
+            it.get("material_code", ""), it.get("material_name", ""),
+            f"{it.get('qty_to_pick', 0)}" + (" (kurang)" if kurang else ""),
+            it.get("unit", ""), "(   )",
         ])
 
-    tbl = Table(rows, colWidths=[8 * mm, 30 * mm, 22 * mm, 25 * mm, 48 * mm, 14 * mm, 12 * mm, 15 * mm])
-    tbl.setStyle(TableStyle([
-        ("BACKGROUND",   (0, 0), (-1, 0), TEAL),
-        ("ROWBACKGROUND",(0, 1), (-1, -1), LIGHT),
-        ("BOX",          (0, 0), (-1, -1), 0.4, TEAL),
-        ("GRID",         (0, 0), (-1, -1), 0.2, colors.HexColor("#c0d8e8")),
-        ("VALIGN",       (0, 0), (-1, -1), "MIDDLE"),
-        ("TOPPADDING",   (0, 0), (-1, -1), 4),
-        ("BOTTOMPADDING",(0, 0), (-1, -1), 4),
-        ("LEFTPADDING",  (0, 0), (-1, -1), 4),
-        ("RIGHTPADDING", (0, 0), (-1, -1), 4),
-    ]))
+    headers, rows2, keys, weights, right_cols, doc_settings = await tpl_table_parts(
+        db, 'picklist', all_keys, all_headers, rows, numeric_keys=('qty',))
 
-    # Signature block
-    sig_tbl = Table([
-        [Paragraph("Picker:", cell), Paragraph("Checker:", cell), Paragraph("Delivered to:", cell)],
-        [Spacer(1, 15 * mm), Spacer(1, 15 * mm), Spacer(1, 15 * mm)],
-        [
-            Paragraph("(_______________)<br/><font size='6'>Nama & TTD</font>", ParagraphStyle("sg", fontSize=7, alignment=TA_CENTER)),
-            Paragraph("(_______________)<br/><font size='6'>Nama & TTD</font>", ParagraphStyle("sg", fontSize=7, alignment=TA_CENTER)),
-            Paragraph("(_______________)<br/><font size='6'>Nama & TTD</font>", ParagraphStyle("sg", fontSize=7, alignment=TA_CENTER)),
-        ],
-    ], colWidths=[62 * mm, 62 * mm, 62 * mm])
-    sig_tbl.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "MIDDLE")]))
+    profile = await get_company_profile(db)
+    tpl = (doc_settings or {}).get('_template') or {}
+    elements = header_flowables(
+        tpl.get('header'), profile, 'PICK LIST',
+        info_pairs=[
+            ('No. Pick List', doc.get('ref_number', '')),
+            ('Dibuat', created_str[:19].replace('T', ' ')),
+            ('Sumber', f"{doc.get('source_type','-')} · {doc.get('source_ref','-')}"),
+            ('Operator', doc.get('assignee_name') or '—'),
+            ('Total', f"{len(items)} item · {doc.get('total_qty', 0)} pcs"),
+            ('Status', doc.get('status', '-')),
+        ], avail=CONTENT_W_PORTRAIT)
 
-    story = [
-        header_info,
-        Spacer(1, 4 * mm),
-        tbl,
-        Spacer(1, 6 * mm),
-        Paragraph("<i>Pick items berurutan sesuai daftar untuk rute terpendek. Scan barcode posisi saat mengambil item.</i>", sub),
-        Spacer(1, 8 * mm),
-        sig_tbl,
-    ]
-    pdf.build(story)
-    buf.seek(0)
+    if headers:
+        elements.append(_pdf_data_table(headers, rows2, weights=weights,
+                                        right_cols=right_cols, style=tpl.get('table')))
 
+    from reportlab.lib.styles import ParagraphStyle
+    from reportlab.lib.units import mm
+    from reportlab.platypus import Paragraph, Spacer
+    elements.append(Spacer(1, 4 * mm))
+    elements.append(Paragraph(
+        "<i>Ambil item berurutan sesuai daftar untuk rute terpendek. "
+        "Scan barcode posisi saat mengambil item.</i>",
+        ParagraphStyle("plNote", fontSize=8, leading=10.5)))
+
+    elements.extend(signature_flowables(
+        tpl.get('signatures'),
+        {"assignee_name": doc.get('assignee_name') or '',
+         "ref_number": doc.get('ref_number', '')},
+        avail=CONTENT_W_PORTRAIT))
+    elements.extend(footer_flowables(tpl.get('footer'), profile))
+
+    buf = _build_pdf(io.BytesIO(), elements)
     ref_number = doc.get("ref_number", "PL")
     return StreamingResponse(buf, media_type="application/pdf",
         headers={"Content-Disposition": f'attachment; filename="picklist_{ref_number}.pdf"'})

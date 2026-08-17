@@ -129,12 +129,15 @@ async def save_format(request: Request, data: FormatIn):
     # jalan keluarnya, bukan diterima diam-diam.
     if (data.mode is not None and data.mode != (entry.get("default_mode") or "auto")
             and not entry.get("policy_enforced")):
+        # SESI #19 — daftar jenis yang SUDAH ditegakkan dibaca langsung dari registry.
+        # Dulu ditulis tangan di dalam pesan ini, jadi setiap jenis baru yang ditegakkan
+        # membuat pesannya BASI (menyebut 8 jenis padahal sudah 11) — dan pesan yang
+        # salah menyesatkan orang yang sedang mencari jalan keluar.
+        sudah = ", ".join(e["label"] for e in DOC_NUMBER_REGISTRY if e.get("policy_enforced"))
         raise HTTPException(400, (
             f"Mode penomoran untuk '{entry['label']}' belum bisa diubah: jalur dokumennya "
             "masih membuat nomor otomatis, jadi setelan manual tidak akan berlaku. "
-            "Yang SUDAH bisa diatur: PO Produksi (SPP), PO Maklon, Roll Kain, Penerimaan FG "
-            "dari CMT, Invoice Maklon, Invoice Piutang (AR), Pengajuan Kasbon, dan Pengajuan "
-            "Pinjaman Karyawan. FORMAT dokumen ini tetap bisa diubah."))
+            f"Yang SUDAH bisa diatur: {sudah}. FORMAT dokumen ini tetap bisa diubah."))
 
     db = get_db()
     cur = await db[CONFIG_COLL].find_one({"key": data.key}, {"_id": 0}) or {}
@@ -172,11 +175,17 @@ async def get_number_policy(request: Request, key: str = Query(..., min_length=3
     pemakai menanggung kebingungan atas setelan yang tidak pernah ia lihat.
     Sengaja `require_auth` (bukan izin admin): yang membutuhkannya adalah staf
     pembuat PO/dokumen, bukan pengelola sistem.
+
+    SESI #19 — token konteks boleh dikirim sebagai `ctx_<TOKEN>` (mis.
+    `?key=wh_delivery_notes.sj_number&ctx_TIPE=SJ-INTERNAL`). Tanpa itu, pratinjau
+    Surat Jalan berbunyi "TIP/2026/08/0001" — nomor yang tidak akan pernah lahir.
     """
     await require_auth(request)
     db = get_db()
-    pol = await _policy.policy(db, key)
-    pol["nomor_berikutnya"] = await _policy.next_preview(db, key)
+    ctx = {k[4:].upper(): v for k, v in request.query_params.items()
+           if k.lower().startswith("ctx_") and v}
+    pol = await _policy.policy(db, key, ctx or None)
+    pol["nomor_berikutnya"] = await _policy.next_preview(db, key, ctx or None)
     return pol
 
 

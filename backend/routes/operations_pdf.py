@@ -16,7 +16,7 @@ from routes.shared import _fmt_date, _fmt_money
 from routes.operations_pdf_helpers import (
     _pdf_styles, _pdf_table_style, _pdf_total_row_style, _build_pdf,
     _pdf_header, _pdf_footer, _safe_str, enrich_with_product_photos,
-    _get_pdf_config, _filter_columns,
+    _get_pdf_config, _filter_columns, tpl_table_parts,
     _pdf_header_branded, _pdf_signature_block, _pdf_footer_branded,
     _pdf_data_table, _pdf_info_pairs,
     CONTENT_W_PORTRAIT, CONTENT_W_LANDSCAPE, content_width,
@@ -484,7 +484,7 @@ async def _resolve_production_guide(db, ref_id: str) -> dict:
 
 @router.get("/export-pdf")
 async def export_pdf(request: Request):
-    await require_auth(request)
+    user = await require_auth(request)
     db = get_db()
     sp = request.query_params
     pdf_type = sp.get('type', '')
@@ -553,10 +553,9 @@ async def export_pdf(request: Request):
                     item.get('qty', 0), _fmt_money(item.get('selling_price_snapshot', 0)),
                     _fmt_money(item.get('cmt_price_snapshot', 0))
                 ])
-            headers, active_keys = all_headers, all_col_keys
-            if config and config.get('columns'):
-                headers, data_rows = _filter_columns(all_headers, all_col_keys, config['columns'], data_rows)
-                active_keys = [k for k in all_col_keys if k in config['columns']]
+            headers, data_rows, active_keys, weights, right_cols, _ds = await tpl_table_parts(
+                db, 'production-po', all_col_keys, all_headers, data_rows,
+                weight_map=weight_map, numeric_keys=('qty', 'price', 'cmt'), config=config)
             total_qty = sum(i.get('qty', 0) for i in items)
             total_row = [''] * len(headers)
             if 'qty' in active_keys:
@@ -567,10 +566,9 @@ async def export_pdf(request: Request):
             elif total_row:
                 total_row[0] = 'TOTAL'
             data_rows.append(total_row)
-            weights = [weight_map.get(k, 1) for k in active_keys]
-            right_cols = [i for i, k in enumerate(active_keys) if k in ('qty', 'price', 'cmt')]
             t = _pdf_data_table(headers, data_rows, weights=weights, right_cols=right_cols,
-                                total_row=True, page='landscape')
+                                total_row=True, page='landscape',
+                                style=(doc_settings.get('_template') or {}).get('table'))
             elements.append(t)
             # ── BOM section — HANYA untuk SPP Internal (Maklon dikecualikan) ──
             if is_internal:
@@ -638,10 +636,9 @@ async def export_pdf(request: Request):
                 data_rows.append([idx, _safe_str(i.get('po_number')), _safe_str(i.get('serial_number')),
                     _safe_str(i.get('product_name'), 60), _safe_str(i.get('sku')),
                     _safe_str(i.get('size')), _safe_str(i.get('color')), i.get('qty_sent', 0)])
-            headers, active_keys = all_headers, all_col_keys
-            if config and config.get('columns'):
-                headers, data_rows = _filter_columns(all_headers, all_col_keys, config['columns'], data_rows)
-                active_keys = [k for k in all_col_keys if k in config['columns']]
+            headers, data_rows, active_keys, weights, right_cols, _ds = await tpl_table_parts(
+                db, 'vendor-shipment', all_col_keys, all_headers, data_rows,
+                weight_map=weight_map, numeric_keys=('qty_sent',), config=config)
             total_row = [''] * len(headers)
             if 'qty_sent' in active_keys:
                 qi = active_keys.index('qty_sent')
@@ -651,9 +648,9 @@ async def export_pdf(request: Request):
             elif total_row:
                 total_row[0] = 'TOTAL'
             data_rows.append(total_row)
-            weights = [weight_map.get(k, 1) for k in active_keys]
-            right_cols = [i for i, k in enumerate(active_keys) if k == 'qty_sent']
-            t = _pdf_data_table(headers, data_rows, weights=weights, right_cols=right_cols, total_row=True)
+            t = _pdf_data_table(headers, data_rows, weights=weights, right_cols=right_cols,
+                                total_row=True,
+                                style=(doc_settings.get('_template') or {}).get('table'))
             elements.append(t)
             # AKSESORIS — dulu HILANG dari surat jalan (laporan owner 2026-08-01).
             acc_rows = await _collect_shipment_accessories(db, ship, items)
@@ -962,9 +959,9 @@ async def export_pdf(request: Request):
                     f"{max(0, cum['ordered'] - cum['shipped']):,}".replace(',', '.'),
                 ])
             active_keys = all_col_keys
-            if config and config.get('columns'):
-                headers, data_rows = _filter_columns(headers, all_col_keys, config['columns'], data_rows)
-                active_keys = [k for k in all_col_keys if k in config['columns']]
+            headers, data_rows, active_keys, weights, right_cols, _ds = await tpl_table_parts(
+                db, 'buyer-shipment-dispatch', all_col_keys, headers, data_rows,
+                weight_map=weight_map, numeric_keys=tuple(num_keys), config=config)
             total_this = sum(i.get('qty_shipped', 0) for i in items)
             total_cum = sum(v['shipped'] for v in cumulative_by_poi.values())
             total_ord = sum(v['ordered'] for v in cumulative_by_poi.values())
@@ -988,11 +985,10 @@ async def export_pdf(request: Request):
             if not label_placed and total_row:
                 total_row[0] = 'TOTAL'
             data_rows.append(total_row)
-            weights = [weight_map.get(k, 1.0) for k in active_keys]
-            right_cols = {i for i, k in enumerate(active_keys) if k in num_keys}
             elements.append(_pdf_data_table(
                 headers, data_rows, weights=weights, right_cols=right_cols,
-                total_row=True, page='landscape'))
+                total_row=True, page='landscape',
+                style=(doc_settings.get('_template') or {}).get('table')))
             sig_context = {
                 'buyer_name': bs.get('customer_name') or bs.get('vendor_name', ''),
                 'shipment_number': bs.get('shipment_number', ''),
@@ -1207,7 +1203,11 @@ async def export_pdf(request: Request):
         # ──── PRODUCTION REPORT (full) ────
         elif pdf_type == 'production-report':
             elements = []
-            _pdf_header(elements, company_name, 'Laporan Produksi Lengkap')
+            # SESI #19 — laporan ikut memakai kop TEMPLATE (dulu `_pdf_header` polos:
+            # hanya nama perusahaan, tanpa logo/telepon/NPWP dan tanpa garis kop).
+            doc_settings = await get_doc_settings(db, 'production-report')
+            _pdf_header_branded(elements, profile, doc_settings, 'LAPORAN PRODUKSI',
+                                avail=CONTENT_W_LANDSCAPE)
             pos = await db.production_pos.find({}, {'_id': 0}).sort('created_at', -1).to_list(500)
             all_col_keys = ['no', 'date', 'po', 'serial', 'product', 'sku', 'size', 'color', 'qty', 'price', 'cmt', 'vendor', 'produced', 'shipped']
             headers = ['No', 'Date', 'PO', 'Serial', 'Product', 'SKU', 'Size', 'Color', 'Qty', 'Price', 'CMT', 'Vendor', 'Produced', 'Shipped']
@@ -1230,15 +1230,22 @@ async def export_pdf(request: Request):
             if config and config.get('columns'):
                 headers, data_rows = _filter_columns(headers, all_col_keys, config['columns'], data_rows)
             if not data_rows:
-                elements.append(Paragraph("No production data found.", styles['Normal']))
+                elements.append(Paragraph("Tidak ada data produksi.", styles['Normal']))
             else:
-                td = [headers] + data_rows
-                cw = [max(22, int(680 / len(headers)))] * len(headers)
-                t = Table(td, colWidths=cw, repeatRows=1)
-                t.setStyle(_pdf_table_style())
-                t.setStyle(TableStyle([('FONTSIZE', (0, 0), (-1, -1), 7)]))
-                elements.append(t)
-            _pdf_footer(elements)
+                # SESI #19 — memakai `_pdf_data_table`: lebar kolom PROPORSIONAL
+                # (dulu `int(680 / len(headers))` — angka ajaib 680 pt padahal lebar
+                # konten A4 landscape 773,8 pt ⇒ tabel tidak penuh) + sel melipat.
+                _h, _rows, _keys, _w, _rc, _ds = await tpl_table_parts(
+                    db, 'production-report', all_col_keys, headers, data_rows,
+                    numeric_keys=('qty', 'price', 'cmt', 'produced', 'shipped'),
+                    config=config)
+                elements.append(_pdf_data_table(
+                    _h, _rows, weights=_w, right_cols=_rc, page='landscape',
+                    style=(doc_settings.get('_template') or {}).get('table')))
+            _pdf_signature_block(elements, doc_settings,
+                                 {'printed_by': (user or {}).get('name', '')},
+                                 page='landscape')
+            _pdf_footer_branded(elements, profile, doc_settings)
             _build_pdf(buf, elements, page='landscape')
             return StreamingResponse(buf, media_type="application/pdf",
                                      headers={"Content-Disposition": f"attachment; filename=production_report_{now_wib().strftime('%Y%m%d')}.pdf"})
@@ -1463,7 +1470,11 @@ async def export_pdf(request: Request):
                 filter_info.append(('To', sp['date_to']))
             if sp.get('status'):
                 filter_info.append(('Status', sp['status']))
-            _pdf_header(elements, company_name, title, info_pairs=filter_info if filter_info else None)
+            # SESI #19 — kop laporan dari TEMPLATE (dulu `_pdf_header` polos).
+            doc_settings = await get_doc_settings(db, pdf_type)
+            _pdf_header_branded(elements, profile, doc_settings, title.upper(),
+                                info_pairs=filter_info if filter_info else None,
+                                avail=CONTENT_W_LANDSCAPE)
 
             if not report_data:
                 elements.append(Paragraph("Tidak ada data ditemukan untuk filter yang dipilih.", styles['Normal']))
@@ -1484,20 +1495,27 @@ async def export_pdf(request: Request):
                     data_rows.append(row_values)
                 if config and config.get('columns'):
                     headers, data_rows = _filter_columns(headers, all_col_keys, config['columns'], data_rows)
-                td = [headers] + data_rows
-                num_cols = len(headers)
-                use_landscape = num_cols > 7
-                page_width = 680 if use_landscape else 445
-                cw = [max(22, int(page_width / num_cols))] * num_cols
-                t = Table(td, colWidths=cw, repeatRows=1)
-                t.setStyle(_pdf_table_style())
-                t.setStyle(TableStyle([('FONTSIZE', (0, 0), (-1, -1), 7 if num_cols > 8 else 8)]))
-                elements.append(t)
+                # SESI #19 — satu jalur tabel untuk semua laporan: lebar proporsional
+                # penuh halaman + sel melipat (dulu `int(page_width / num_cols)` dengan
+                # angka ajaib 680/445 pt dan STRING mentah tanpa word-wrap).
+                _h, _rows, _keys, _w, _rc, _ds = await tpl_table_parts(
+                    db, pdf_type, all_col_keys, headers, data_rows,
+                    numeric_keys=('harga', 'hpp', 'amount', 'paid', 'remaining',
+                                  'output_qty', 'qty_progress', 'defect_qty',
+                                  'total_qty', 'item_count', 'items', 'qty_sent'),
+                    config=config)
+                headers = _h
+                elements.append(_pdf_data_table(
+                    _h, _rows, weights=_w, right_cols=_rc, page='landscape',
+                    style=(doc_settings.get('_template') or {}).get('table')))
 
             elements.append(Spacer(1, 4*mm))
             elements.append(Paragraph(f"<i>Total Records: {len(report_data)}</i>", styles['Normal']))
-            _pdf_footer(elements)
-            _build_pdf(buf, elements, page='landscape' if len(headers) > 7 else None)
+            _pdf_signature_block(elements, doc_settings,
+                                 {'printed_by': (user or {}).get('name', '')},
+                                 page='landscape')
+            _pdf_footer_branded(elements, profile, doc_settings)
+            _build_pdf(buf, elements, page='landscape')
             return StreamingResponse(buf, media_type="application/pdf",
                                      headers={"Content-Disposition": f"attachment; filename=laporan_{report_type}_{now_wib().strftime('%Y%m%d')}.pdf"})
 

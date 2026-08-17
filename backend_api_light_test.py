@@ -8,7 +8,7 @@ Backend core logic already proven by test_core_f3_fulfillment.py (55/55 PASS).
 import requests
 import sys
 
-BASE_URL = "https://maklon-dispatch-fix.preview.emergentagent.com"
+BASE_URL = "https://smart-preview-pdf.preview.emergentagent.com"
 API_BASE = f"{BASE_URL}/api/marketing/data-import"
 
 # Color codes

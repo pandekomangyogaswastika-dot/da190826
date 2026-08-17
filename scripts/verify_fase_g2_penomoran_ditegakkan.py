@@ -29,6 +29,10 @@ INVARIAN:
   G6  nomor unik: nomor manual yang sudah dipakai DITOLAK (409)
   G7  LAYAR memakai kebijakan: form kasbon membaca `/doc-number-policy` dan layar admin
       menyembunyikan pilihan mode untuk jenis yang belum ditegakkan
+  G8  (SESI #19) tiga jenis tambahan — **Surat Jalan Gudang**, **PR Pengadaan**,
+      **Jurnal Umum** — ditegakkan pada DOKUMEN SUNGGUHAN: mode otomatis menolak
+      nomor ketikan & nomor lahir mengikuti format owner; mode manual menolak nomor
+      kosong, nomor berpola bebas, dan nomor kembar (409)
 
 Self-cleaning: seluruh pengajuan uji (`UJI-G2 …`) dan setelan mode dikembalikan.
 
@@ -56,7 +60,13 @@ G, Y, R, C, B, X = "\033[92m", "\033[93m", "\033[91m", "\033[96m", "\033[1m", "\
 MARK = f"UJI-G2 {time.strftime('%H%M%S')}"
 KASBON_KEY = "dewi_kasbon_requests.request_number"
 PINJAMAN_KEY = "dewi_kasbon_requests.request_number_pinjaman"
-NOT_ENFORCED_KEY = "rahaza_journal_entries.je_number"
+# SESI #19 — kunci "belum ditegakkan" untuk menguji G4. DULU memakai
+# `rahaza_journal_entries.je_number`; jurnal kini DITEGAKKAN, jadi kunci itu tidak
+# lagi bisa membuktikan penolakan mode. Dipilih Nota Kredit (masih otomatis penuh).
+# Format yang dikirim pada uji G4 sengaja SAMA dengan bawaan registry supaya
+# menjalankan gate tidak mengubah perilaku penomoran apa pun.
+NOT_ENFORCED_KEY = "rahaza_credit_notes.cn_number"
+NOT_ENFORCED_FORMAT = "CN-{YYYY}{MM}{DD}-{SEQ:3}"
 
 # Jalur tulis yang WAJIB memanggil issue_number untuk tiap kunci ber-policy_enforced.
 WRITE_PATHS = {
@@ -68,6 +78,22 @@ WRITE_PATHS = {
     "rahaza_ar_invoices.invoice_number": "backend/routes/rahaza_finance.py",
     KASBON_KEY: "backend/routes/dewi_kasbon.py",
     PINJAMAN_KEY: "backend/routes/dewi_kasbon.py",
+    # SESI #19 — tiga jenis tambahan (permintaan owner)
+    "wh_delivery_notes.sj_number": "backend/routes/wms_delivery_notes.py",
+    "dewi_procurement_requests.request_number": "backend/routes/dewi_procurement.py",
+    "rahaza_journal_entries.je_number": "backend/routes/rahaza_journals.py",
+}
+
+# SESI #19 — FORM yang wajib membaca kebijakan (bukan sekadar backend yang menegakkan):
+# form tanpa kolom nomor membuat mode MANUAL berarti "dokumen tidak bisa dibuat".
+FORM_PATHS = {
+    "wh_delivery_notes.sj_number":
+        "frontend/src/components/erp/WMSDeliveryNotesModule.jsx",
+    "dewi_procurement_requests.request_number":
+        "frontend/src/components/erp/ProcurementRequestModule.jsx",
+    "rahaza_journal_entries.je_number":
+        "frontend/src/components/erp/RahazaJournalEntryModule.jsx",
+    KASBON_KEY: "frontend/src/components/erp/KasbonStaffModule.jsx",
 }
 
 PASS, FAIL = [], []
@@ -119,6 +145,53 @@ def ajukan(token, jenis, nomor=None, cicilan=1):
     return st, d, ((d or {}).get("request") or {}).get("request_number")
 
 
+# ═════════════ SESI #19 — tiga jenis dokumen baru (SJ Gudang · PR · Jurnal) ════
+# Dibuktikan pada DOKUMEN SUNGGUHAN lewat API, bukan dengan membaca kode: satu
+# jenis bisa "memanggil issue_number" tetapi tetap salah bila formnya mengirim
+# nomor pada mode otomatis atau modelnya membuang kolom nomor.
+YMD = time.strftime("%Y%m%d")
+SJ_TIPE = "SJ-INTERNAL"
+
+
+def buat_sj(token, nomor=None):
+    body = {"sj_type": SJ_TIPE, "recipient_name": MARK, "recipient_address": MARK,
+            "notes": MARK, "lines": [{"description": MARK, "qty": 1, "unit": "pcs"}]}
+    if nomor is not None:
+        body["sj_number"] = nomor
+    st, d = call("POST", "/api/wms/delivery-notes", token, body)
+    return st, d, ((d or {}).get("sj") or {}).get("sj_number")
+
+
+def buat_pr(token, nomor=None):
+    body = {"title": MARK, "justification": MARK, "department": MARK,
+            "items": [{"name": MARK, "qty": 1, "uom": "pcs", "estimated_price": 1000}]}
+    if nomor is not None:
+        body["request_number"] = nomor
+    st, d = call("POST", "/api/procurement/requests", token, body)
+    return st, d, (d or {}).get("request_number")
+
+
+def buat_je(token, akun, nomor=None):
+    body = {"date": time.strftime("%Y-%m-%d"), "memo": MARK, "post": False,
+            "lines": [{"account_code": akun[0], "debit": 1000, "credit": 0,
+                       "description": MARK},
+                      {"account_code": akun[1], "debit": 0, "credit": 1000,
+                       "description": MARK}]}
+    if nomor is not None:
+        body["je_number"] = nomor
+    st, d = call("POST", "/api/rahaza/journals", token, body)
+    return st, d, (d or {}).get("je_number")
+
+
+def akun_jurnal(token) -> list:
+    """Dua akun leaf yang sah untuk jurnal uji (tanpa mengubah data master)."""
+    _st, d = call("GET", "/api/rahaza/coa/accounts", token)
+    rows = d if isinstance(d, list) else (d or {}).get("items") or []
+    leaf = [r.get("code") for r in rows
+            if not r.get("is_group") and r.get("active") is not False and r.get("code")]
+    return leaf[:2]
+
+
 # ═════════════════════ G1 & G7 — statik ═══════════════════════════════════════
 
 def part_static():
@@ -153,9 +226,21 @@ def part_static():
     if "policy_enforced" not in admin or "docnum-mode-locked-" not in admin:
         miss7.append("layar admin tidak menyembunyikan pilihan mode untuk jenis "
                      "yang belum ditegakkan")
+    # SESI #19 — setiap jenis yang ditegakkan HARUS punya kolom nomor di formnya.
+    for key, rel in FORM_PATHS.items():
+        p = ROOT / rel
+        if not p.exists():
+            miss7.append(f"{key}: form {rel} tidak ada")
+            continue
+        src = p.read_text(encoding="utf-8")
+        if "DocNumberField" not in src or "useDocNumberPolicy" not in src:
+            miss7.append(f"{key}: {rel} belum memasang <DocNumberField>")
+        elif key not in src:
+            miss7.append(f"{key}: {rel} memasang DocNumberField tetapi bukan untuk kunci ini")
     if not miss7:
         ok("G7", "LAYAR memakai kebijakan: form kasbon membaca kebijakan & layar admin jujur",
-           "DocNumberField dipakai bersama; toggle mode hanya untuk yang ditegakkan")
+           f"DocNumberField dipakai {len(FORM_PATHS)} form (kasbon · surat jalan gudang · PR · "
+           "jurnal umum); toggle mode hanya untuk yang ditegakkan")
     else:
         bad("G7", "layar belum memakai kebijakan", "; ".join(miss7))
 
@@ -222,7 +307,7 @@ def part_runtime(token, db):
                      {"key": NOT_ENFORCED_KEY, "mode": "manual", "active": True})
     st_fmt, _df = call("PUT", "/api/admin/doc-numbering", token,
                        {"key": NOT_ENFORCED_KEY,
-                        "format": "JE-{YYYY}{MM}{DD}-{SEQ:4}", "active": True})
+                        "format": NOT_ENFORCED_FORMAT, "active": True})
     cfg = db.doc_number_configs.find_one({"key": NOT_ENFORCED_KEY}, {"_id": 0}) or {}
     if (st_mode == 400 and st_m == 400 and "belum bisa diubah" in det(d_m).lower()
             and st_fmt == 200 and cfg.get("mode") in (None, "auto")):
@@ -234,12 +319,91 @@ def part_runtime(token, db):
             f"mode HTTP {st_m} {det(d_m)[:110]} · format HTTP {st_fmt} · mode tersimpan={cfg.get('mode')}")
 
 
+def part_runtime_baru(token, db):
+    """SESI #19 — G8: tiga jenis baru ditegakkan pada dokumen SUNGGUHAN."""
+    print(f"\n{B}[3] RUNTIME BARU — Surat Jalan Gudang · PR Pengadaan · Jurnal Umum{X}")
+    akun = akun_jurnal(token)
+    jenis = [
+        ("Surat Jalan Gudang", "wh_delivery_notes.sj_number",
+         lambda n=None: buat_sj(token, n),
+         f"{SJ_TIPE}/{time.strftime('%Y/%m')}/9901", "KIRIM/BEBAS/9"),
+        ("PR Pengadaan", "dewi_procurement_requests.request_number",
+         lambda n=None: buat_pr(token, n),
+         f"PR-{time.strftime('%Y%m')}-9901", "PR/BEBAS/9"),
+        ("Jurnal Umum", "rahaza_journal_entries.je_number",
+         lambda n=None: buat_je(token, akun, n),
+         f"JE-{YMD}-9901", "JURNAL/BEBAS/9"),
+    ]
+    if len(akun) < 2:
+        bad("G8", "tidak menemukan 2 akun leaf untuk jurnal uji — invarian tidak bisa diukur",
+            f"akun terbaca: {akun}")
+        return
+
+    rusak, bukti = [], []
+    for label, key, buat, nomor_benar, nomor_bebas in jenis:
+        set_mode(token, key, "auto")
+        st_typed, d_typed, _ = buat("BEBAS-999")
+        st_auto, d_auto, no_auto = buat()
+        _s, pol = call("GET", f"/api/doc-number-policy?key={key}", token)
+        pola = (pol or {}).get("pola") or "^$"
+        if st_typed != 400 or "tidak boleh diketik" not in det(d_typed).lower():
+            rusak.append(f"{label}: mode OTOMATIS masih menerima nomor ketikan "
+                         f"(HTTP {st_typed} {det(d_typed)[:70]})")
+        if st_auto != 200 or not no_auto:
+            rusak.append(f"{label}: pembuatan otomatis gagal (HTTP {st_auto} {det(d_auto)[:80]})")
+        elif not re.match(pola, no_auto):
+            rusak.append(f"{label}: nomor otomatis '{no_auto}' tidak mengikuti format owner "
+                         f"({(pol or {}).get('format')})")
+
+        set_mode(token, key, "manual")
+        st_empty, d_empty, _ = buat()
+        st_free, d_free, _ = buat(nomor_bebas)
+        st_good, d_good, no_good = buat(nomor_benar)
+        st_dup, d_dup, _ = buat(nomor_benar)
+        if st_empty != 400 or "wajib diisi" not in det(d_empty).lower():
+            rusak.append(f"{label}: mode MANUAL menerima nomor kosong (HTTP {st_empty})")
+        if st_free != 400 or "tidak mengikuti pola" not in det(d_free).lower():
+            rusak.append(f"{label}: mode MANUAL menerima nomor berpola bebas "
+                         f"(HTTP {st_free} {det(d_free)[:70]})")
+        if st_good != 200 or no_good != nomor_benar:
+            rusak.append(f"{label}: nomor manual yang BENAR ditolak "
+                         f"(HTTP {st_good} {det(d_good)[:90]})")
+        if st_dup != 409:
+            rusak.append(f"{label}: nomor manual kembar diterima (HTTP {st_dup} "
+                         f"{det(d_dup)[:70]})")
+        set_mode(token, key, "auto")
+        bukti.append(f"{label}: otomatis→{no_auto} · manual→{no_good}")
+
+    if not rusak:
+        ok("G8", "3 jenis baru ditegakkan pada dokumen sungguhan: otomatis menolak ketikan, "
+                 "manual menolak kosong/pola bebas/nomor kembar", " · ".join(bukti))
+    else:
+        bad("G8", "penomoran 3 jenis baru belum ditegakkan sebagaimana mestinya",
+            "; ".join(rusak))
+
+
 def cleanup(db, token):
     n = db.dewi_kasbon_requests.delete_many({"purpose": MARK}).deleted_count
     n += db.dewi_kasbon_requests.delete_many({"reason": MARK}).deleted_count
     set_mode(token, KASBON_KEY, "auto")
     db.counters.delete_many({"_id": {"$regex": r"^autonum:dewi_kasbon_requests:request_number:"}})
-    print(f"\n{Y}  bersih-bersih: {n} pengajuan uji dihapus · mode kasbon dikembalikan ke otomatis{X}")
+    # SESI #19 — dokumen uji tiga jenis baru + counter-nya (counter disemai ulang dari
+    # nomor tertinggi yang MASIH ada, jadi menghapusnya tidak menimbulkan nomor kembar).
+    baru = db.wh_delivery_notes.delete_many({"notes": MARK}).deleted_count
+    baru += db.dewi_procurement_requests.delete_many({"title": MARK}).deleted_count
+    je_uji = [j.get("je_number") for j in db.rahaza_journal_entries.find({"memo": MARK}, {"je_number": 1})]
+    baru += db.rahaza_journal_entries.delete_many({"memo": MARK}).deleted_count
+    if je_uji:
+        db.rahaza_journal_lines.delete_many({"je_number": {"$in": je_uji}})
+    for coll, field in (("wh_delivery_notes", "sj_number"),
+                        ("dewi_procurement_requests", "request_number"),
+                        ("rahaza_journal_entries", "je_number")):
+        db.counters.delete_many({"_id": {"$regex": rf"^autonum:{coll}:{field}:"}})
+    for key in ("wh_delivery_notes.sj_number", "dewi_procurement_requests.request_number",
+                "rahaza_journal_entries.je_number"):
+        set_mode(token, key, "auto")
+    print(f"\n{Y}  bersih-bersih: {n} pengajuan kasbon + {baru} dokumen uji (SJ/PR/JE) dihapus · "
+          f"semua mode dikembalikan ke otomatis{X}")
 
 
 def main():
@@ -255,6 +419,7 @@ def main():
         return 2
     try:
         part_runtime(token, db)
+        part_runtime_baru(token, db)
     except Exception as e:  # noqa: BLE001
         bad("RUNTIME", "invarian runtime gagal dijalankan", str(e))
     finally:

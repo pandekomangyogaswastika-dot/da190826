@@ -1152,6 +1152,18 @@ async def create_indexes():
     except Exception as e:  # noqa: BLE001
         logger.warning(f"[nomor-dokumen] gagal memasang index unik: {e}")
 
+    # ── TEMPLATE PDF: MIGRASI SETELAN LAMA (SESI #19) ────────────────────────
+    # Dua koleksi setelan PDF lama (`pdf_document_settings` untuk kop & tanda tangan,
+    # `pdf_export_configs` untuk kolom) disatukan ke `pdf_templates`. Migrasi
+    # IDEMPOTEN dan tidak pernah menimpa setelan yang sudah dibuat di layar baru,
+    # sehingga aman dijalankan tiap startup. Blok try SENDIRI: setelan PDF tidak
+    # boleh bisa menggagalkan startup — dokumen tetap tercetak dengan bawaan.
+    try:
+        from core.pdf_template import migrate_legacy as _migrate_pdf_tpl
+        await _migrate_pdf_tpl(db, logger)
+    except Exception as e:  # noqa: BLE001
+        logger.warning(f"[pdf-template] migrasi setelan PDF lama dilewati: {e}")
+
 @app.on_event("shutdown")
 async def shutdown():
     try:
@@ -1350,6 +1362,7 @@ from routes.operations_excel import router as operations_excel_router
 from routes.operations_pdf import router as operations_pdf_router
 from routes.operations_pdf_configs import router as operations_pdf_configs_router
 from routes.pdf_document_settings import router as pdf_document_settings_router
+from routes.pdf_templates import router as pdf_templates_router
 from routes.document_number_configs import router as document_number_configs_router
 from routes.file_storage import router as file_router
 from routes.websocket import router as ws_router
@@ -1460,6 +1473,8 @@ app.include_router(operations_excel_router)
 app.include_router(operations_pdf_router)
 app.include_router(operations_pdf_configs_router)
 app.include_router(pdf_document_settings_router)
+# SESI #19 — layar SATU PINTU "PDF & Kop Surat" (menggantikan dua layar di atas)
+app.include_router(pdf_templates_router)
 app.include_router(document_number_configs_router)
 app.include_router(file_router)
 app.include_router(ws_router)

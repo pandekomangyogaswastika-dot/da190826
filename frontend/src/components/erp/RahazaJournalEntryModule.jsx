@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button';
 import { PageHeader, StatTile } from './moduleAtoms';
 import { IconButton } from './IconButton';
 import { formatRupiah } from '@/lib/format';
+import DocNumberField, { useDocNumberPolicy, docNumberPayload } from './docnum/DocNumberField';
 
 const fmt = formatRupiah;
 const todayISO = () => new Date().toISOString().slice(0, 10);
@@ -21,16 +22,21 @@ function StatusBadge({ status }) {
   return <span className={`text-[9px] uppercase tracking-wider font-semibold px-1.5 py-0.5 rounded border ${cls}`}>{status}</span>;
 }
 
-function JournalEditor({ accounts, onSave, onClose }) {
+function JournalEditor({ accounts, onSave, onClose, token }) {
   const [form, setForm] = useState({
     date: todayISO(),
     memo: '',
+    je_number: '',
     post: false,
     lines: [
       { account_code: '', debit: 0, credit: 0, description: '' },
       { account_code: '', debit: 0, credit: 0, description: '' },
     ],
   });
+  // SESI #19 — kebijakan penomoran Jurnal Umum (Otomatis/Manual) dari Administrasi
+  // Sistem → Penomoran Dokumen. Jurnal hasil posting otomatis dokumen lain tetap
+  // bernomor otomatis; yang diatur di sini adalah jurnal yang diketik orang.
+  const numPolicy = useDocNumberPolicy('rahaza_journal_entries.je_number', token);
   const handle = (k, v) => setForm(f => ({ ...f, [k]: v }));
   const setLine = (i, k, v) => setForm(f => ({ ...f, lines: f.lines.map((ln, idx) => idx === i ? { ...ln, [k]: v } : ln) }));
   const addLine = () => setForm(f => ({ ...f, lines: [...f.lines, { account_code: '', debit: 0, credit: 0, description: '' }] }));
@@ -39,12 +45,14 @@ function JournalEditor({ accounts, onSave, onClose }) {
   const totalD = form.lines.reduce((s, l) => s + (Number(l.debit) || 0), 0);
   const totalC = form.lines.reduce((s, l) => s + (Number(l.credit) || 0), 0);
   const balanced = totalD === totalC && totalD > 0;
+  const nomorSiap = numPolicy?.mode !== 'manual' || !!form.je_number.trim();
 
   const submit = (asDraft) => {
     const body = {
       date: form.date,
       memo: form.memo,
       post: !asDraft,
+      ...docNumberPayload(numPolicy, 'je_number', form.je_number),
       lines: form.lines.filter(l => l.account_code).map(l => ({
         account_code: l.account_code,
         debit: Number(l.debit) || 0,
@@ -71,6 +79,15 @@ function JournalEditor({ accounts, onSave, onClose }) {
         <div className="md:col-span-2">
           <label className="text-[10px] uppercase text-muted-foreground font-semibold">Memo / Deskripsi</label>
           <GlassInput value={form.memo} onChange={e => handle('memo', e.target.value)} placeholder="Mis. Setoran modal awal" data-testid="je-input-memo" />
+        </div>
+        <div className="md:col-span-3">
+          <DocNumberField
+            policy={numPolicy}
+            value={form.je_number}
+            onChange={v => handle('je_number', v)}
+            label="Nomor Jurnal"
+            testId="je-number"
+          />
         </div>
       </div>
 
@@ -120,8 +137,8 @@ function JournalEditor({ accounts, onSave, onClose }) {
         </div>
         <div className="flex gap-2">
           <Button variant="ghost" onClick={onClose} className="h-9 border border-[var(--glass-border)]" data-testid="je-editor-cancel">Batal</Button>
-          <Button variant="ghost" onClick={() => submit(true)} className="h-9 border border-[var(--glass-border)]" disabled={!balanced} data-testid="je-save-draft">Simpan Draft</Button>
-          <Button onClick={() => submit(false)} className="h-9" disabled={!balanced} data-testid="je-save-post">Simpan & Post</Button>
+          <Button variant="ghost" onClick={() => submit(true)} className="h-9 border border-[var(--glass-border)]" disabled={!balanced || !nomorSiap} data-testid="je-save-draft">Simpan Draft</Button>
+          <Button onClick={() => submit(false)} className="h-9" disabled={!balanced || !nomorSiap} data-testid="je-save-post">Simpan & Post</Button>
         </div>
       </div>
     </GlassCard>
@@ -278,7 +295,7 @@ export default function RahazaJournalEntryModule({ token }) {
         <StatTile label="Voided" value={kpi.voided} accent="danger" testId="je-kpi-voided" />
       </div>
 
-      {editing && <JournalEditor accounts={accounts} onSave={save} onClose={() => setEditing(null)} />}
+      {editing && <JournalEditor accounts={accounts} onSave={save} onClose={() => setEditing(null)} token={token} />}
       {detailJE && <JournalDetail je={detailJE} onPost={postJE} onVoid={voidJE} onDelete={delDraft} onClose={() => setDetailId(null)} />}
 
       <GlassCard className="p-4">

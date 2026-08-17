@@ -22,9 +22,22 @@ DOC_NUMBER_REGISTRY = [
      "policy_enforced": True,
      "default_format": "RL-{YYYY}{MM}-{SEQ:4}", "tokens": [], "default_mode": "auto",
      "catatan": "Dibuat otomatis saat penerimaan kain (rincian roll per gulungan)."},
-    {"key": "wh_delivery_notes.sj_number", "label": "Surat Jalan", "group": "Gudang",
+    # SESI #19 (2026-08-17) — Surat Jalan Gudang DITEGAKKAN. Nomor SJ gudang selama
+    # ini 100% otomatis dan kolom nomornya tidak pernah ada di form, sehingga owner
+    # yang memindah setelan ke MANUAL tidak melihat perubahan apa pun.
+    # `default_mode: auto` menjaga perilaku hari ini APA ADANYA.
+    # PENTING: surat jalan yang LAHIR TANPA MANUSIA tetap bernomor otomatis, yaitu
+    # SJ-CMT yang dibuat `routes/wms_cmt_dispatches.py::execute_dispatch` — tidak ada
+    # orang di layar itu yang bisa mengetik nomor, jadi mode MANUAL tidak berlaku
+    # untuknya (formatnya tetap mengikuti setelan ini).
+    {"key": "wh_delivery_notes.sj_number", "label": "Surat Jalan Gudang", "group": "Gudang",
+     "policy_enforced": True,
      "default_format": "{TIPE}/{YYYY}/{MM}/{SEQ:4}", "tokens": ["TIPE"],
-     "catatan": "TIPE = jenis surat jalan (mis. SJ, SJK)."},
+     "default_mode": "auto",
+     "catatan": "TIPE = jenis surat jalan (SJ-CMT, SJ-MAKLON, SJ-SUPPLIER, SJ-INTERNAL, "
+                "SJ-ONLINE). Mode MANUAL berlaku untuk surat jalan yang dibuat orang di "
+                "layar Gudang; SJ-CMT yang lahir otomatis dari Kirim Material ke CMT tetap "
+                "bernomor otomatis."},
     {"key": "wh_cmt_dispatches.dispatch_no", "label": "Pengiriman ke CMT", "group": "Gudang",
      "default_format": "CMD/{YYYY}/{MM}/{SEQ:4}", "tokens": []},
     {"key": "wh_returns.return_code", "label": "Retur Gudang", "group": "Gudang",
@@ -48,8 +61,11 @@ DOC_NUMBER_REGISTRY = [
      "default_format": "SHP-{YYYY}{MM}{DD}-{SEQ:3}", "tokens": []},
 
     # ── PENGADAAN ─────────────────────────────────────────────────────────────
+    # SESI #19 (2026-08-17) — PR Pengadaan DITEGAKKAN (permintaan owner).
     {"key": "dewi_procurement_requests.request_number", "label": "Permintaan Pengadaan (PR)", "group": "Pengadaan",
-     "default_format": "PR-{YYYY}{MM}-{SEQ:4}", "tokens": []},
+     "policy_enforced": True,
+     "default_format": "PR-{YYYY}{MM}-{SEQ:4}", "tokens": [], "default_mode": "auto",
+     "catatan": "Mode MANUAL: nomor PR diketik pemohon tetapi wajib mengikuti pola ini."},
     {"key": "rahaza_purchase_orders.po_number", "label": "Purchase Order (PO)", "group": "Pengadaan",
      "default_format": "PO-{YYYY}{MM}{DD}-{SEQ:3}", "tokens": []},
     {"key": "acc_purchase_requests.pr_number", "label": "Permintaan Beli Aksesoris", "group": "Pengadaan",
@@ -112,8 +128,15 @@ DOC_NUMBER_REGISTRY = [
      "default_format": "VJ-{SEQ:5}", "tokens": []},
 
     # ── KEUANGAN ──────────────────────────────────────────────────────────────
+    # SESI #19 (2026-08-17) — Jurnal Umum DITEGAKKAN (permintaan owner).
+    # Satu buku besar = satu urutan nomor, jadi TIDAK dibuat kunci kedua untuk jurnal
+    # otomatis: dua format berbeda pada satu field justru merusak urutan arsipnya.
     {"key": "rahaza_journal_entries.je_number", "label": "Jurnal Umum (JE)", "group": "Keuangan",
-     "default_format": "JE-{YYYY}{MM}{DD}-{SEQ:4}", "tokens": []},
+     "policy_enforced": True,
+     "default_format": "JE-{YYYY}{MM}{DD}-{SEQ:4}", "tokens": [], "default_mode": "auto",
+     "catatan": "Mode MANUAL berlaku untuk Jurnal Umum yang diketik orang di layar Keuangan. "
+                "Jurnal yang lahir otomatis dari posting dokumen lain (penjualan, penggajian, "
+                "penerimaan barang) tetap bernomor otomatis — tidak ada yang mengetiknya."},
     {"key": "rahaza_ar_invoices.invoice_number", "label": "Invoice Piutang (AR)", "group": "Keuangan",
      "policy_enforced": True,
      "default_format": "AR-{YYYY}{MM}{DD}-{SEQ:3}", "tokens": []},

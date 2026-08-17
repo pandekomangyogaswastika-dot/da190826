@@ -512,6 +512,23 @@ if [ $AUTH_READY -eq 1 ]; then
   run_gate "DATA — Setelan penomoran dokumen benar-benar ditegakkan (INV-F25)" \
            "python3 scripts/verify_fase_g2_penomoran_ditegakkan.py"
 
+  # ── INV-F26 (2026-08-18, SESI #19) — TEMPLATE PDF TERCETAK & SATU PINTU ─────
+  # Keluhan pemilik: "editor pdf masih sangat buruk", "ada dua halaman berbeda ui
+  # ux-nya", "header surat sangat buruk sekali". Yang TERUKUR sebelum perbaikan:
+  # dua koleksi setelan (`pdf_document_settings` untuk kop/TTD, `pdf_export_configs`
+  # untuk kolom) dengan dua layar berbeda mengatur SATU dokumen; kop tidak bisa
+  # memuat LOGO sama sekali (`show_logo` disimpan tetapi tidak ada generator yang
+  # menggambar gambar); kolom hanya bisa disembunyikan (urutan selalu urutan kode,
+  # kolom baru tidak mungkin); blok tanda tangan dipotong tiga (`sig_defs[:3]`)
+  # sehingga blok keempat hilang tanpa pesan; Pick List tanpa kop sama sekali dan
+  # tabelnya 174 mm dari 186 mm lebar konten.
+  # Gate ini MENGUKUR DARI PDF JADI (pymupdf): kop+logo dari konfigurasi benar-benar
+  # tercetak di dokumen sungguhan, urutan/tampil-tidak kolom berlaku, jumlah blok
+  # tanda tangan sesuai setelan, 0 tumpang tindih, tabel ≥97% lebar konten, logo
+  # divalidasi, dan endpoint warisan membaca template yang sama (bukan sumber kedua).
+  run_gate "DOKUMEN — Template PDF (kop/logo/kolom/TTD) benar-benar tercetak (INV-F26)" \
+           "python3 scripts/verify_fase_i_pdf_template.py"
+
 else
   for g in "state machine jurnal" "nomor dokumen kembar" "batas nilai AR/AP" \
            "RBAC/IDOR" "input jahat 4xx" "endpoint kritis" \
@@ -538,7 +555,8 @@ else
            "Gulungan kain lahir & wajib ditunjuk (INV-F22)" \
            "Surat jalan satu daftar + pintu lama (INV-F23)" \
            "Arus keluar Cutting berdokumen (INV-F24)" \
-           "Setelan penomoran ditegakkan (INV-F25)"; do
+           "Setelan penomoran ditegakkan (INV-F25)" \
+           "Template PDF tercetak & satu pintu (INV-F26)"; do
     skip_gate "$g" "backend/auth belum siap"
   done
 fi

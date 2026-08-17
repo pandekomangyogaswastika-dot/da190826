@@ -26,6 +26,7 @@ Endpoints:
 from fastapi import APIRouter, Request, HTTPException, Query
 from database import get_db
 from utils.counters import gen_prefixed_number
+from core.doc_number_policy import issue_number
 from auth import require_auth
 from routes.shared import require_portal
 from core import uom as _uom          # SSOT konversi satuan (INV-UOM-1/2)
@@ -38,6 +39,8 @@ import logging
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/procurement", tags=["procurement"])
+# SESI #19 — kunci kebijakan penomoran PR (registry `data/doc_number_registry.py`).
+PR_DOCNUM_KEY = "dewi_procurement_requests.request_number"
 
 
 def _uid(): return str(uuid.uuid4())
@@ -280,12 +283,16 @@ STATUS_LABELS = {
 }
 
 
-async def _gen_pr_number(db) -> str:
-    year = date.today().year
-    month = date.today().strftime("%m")
-    prefix = f"PR-{year}{month}-"
-    # RC-5 fix: atomic race-safe numbering (was count_documents()+1)
-    return await gen_prefixed_number(db, "dewi_procurement_requests", "request_number", prefix, 4)
+async def _gen_pr_number(db, requested: str = "") -> str:
+    """Nomor PR lewat SATU PINTU kebijakan penomoran (SESI #19).
+
+    Dulu selalu otomatis (`gen_prefixed_number`), sehingga owner yang memindah
+    "Permintaan Pengadaan (PR)" ke MANUAL di Administrasi Sistem → Penomoran Dokumen
+    melihat setelannya tersimpan tetapi PR baru tetap bernomor otomatis.
+    `issue_number` menegakkan modenya: MANUAL → nomor wajib diisi & wajib mengikuti
+    pola; OTOMATIS → nomor ketikan ditolak dengan menyebut nomor yang akan dipakai.
+    """
+    return await issue_number(db, PR_DOCNUM_KEY, requested=requested)
 
 
 # ─── Dashboard ────────────────────────────────────────────────────────────
@@ -498,7 +505,7 @@ async def create_request(request: Request):
         raise HTTPException(400, "Minimal 1 item harus diisi.")
 
     total_est = sum(float(i["total_price"]) for i in items)
-    pr_number = await _gen_pr_number(db)
+    pr_number = await _gen_pr_number(db, (body.get("request_number") or "").strip())
     doc = {
         "id": _uid(),
         "request_number": pr_number,

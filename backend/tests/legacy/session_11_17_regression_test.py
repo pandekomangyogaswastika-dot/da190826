@@ -24,7 +24,7 @@ import requests
 import sys
 
 # Public endpoint from frontend/.env
-API = "https://maklon-dispatch-fix.preview.emergentagent.com"
+API = "https://smart-preview-pdf.preview.emergentagent.com"
 
 class Session1117RegressionTester:
     def __init__(self):

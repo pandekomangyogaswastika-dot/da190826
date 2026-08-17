@@ -11,7 +11,7 @@ Tests for:
 import requests
 import sys
 
-API = "https://maklon-dispatch-fix.preview.emergentagent.com"
+API = "https://smart-preview-pdf.preview.emergentagent.com"
 
 class P0GapFixTester:
     def __init__(self):

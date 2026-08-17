@@ -9,7 +9,7 @@ import json
 from datetime import datetime, date
 
 # Public endpoint from frontend/.env
-BASE_URL = "https://maklon-dispatch-fix.preview.emergentagent.com"
+BASE_URL = "https://smart-preview-pdf.preview.emergentagent.com"
 
 class F9SettlementTester:
     def __init__(self):

@@ -341,10 +341,32 @@ def _build_payslip_pdf(slip: dict, run: dict, profile: dict = None, doc_settings
     ]))
 
     # ── assemble ────────────────────────────────────────────────────────────────
+    # SESI #19 — kop memakai TEMPLATE PDF pemilik bila ada (logo, telepon, NPWP,
+    # tata letak). Kop lama (nama + tagline + garis tebal) TETAP dipakai sebagai
+    # cadangan supaya slip gaji tidak pernah gagal cetak hanya karena template
+    # belum diatur. Sisa tata letak A5 (kotak karyawan, blok gaji bersih,
+    # watermark RAHASIA) sengaja TIDAK diubah: itu bagian yang sudah baik.
+    _tpl = (doc_settings or {}).get("_template") or {}
+    kop_els = []
+    if _tpl.get("header"):
+        try:
+            from core.pdf_template import header_flowables
+            kop_els = header_flowables(
+                _tpl["header"], profile, "SLIP GAJI",
+                info_pairs=[
+                    ("No. Run", run.get("run_number", "")),
+                    ("Periode", f"{slip.get('period_from', '')} s/d {slip.get('period_to', '')}"),
+                ], avail=W)
+        except Exception as e:  # noqa: BLE001
+            log.warning("[payslip] kop template gagal dipakai, memakai kop lama: %s", e)
+            kop_els = []
+
     story = [
-        company_tbl,
-        sub_tbl,
-        HRFlowable(width="100%", thickness=1.5, color=TEAL, spaceAfter=4),
+        *(kop_els if kop_els else [
+            company_tbl,
+            sub_tbl,
+            HRFlowable(width="100%", thickness=1.5, color=TEAL, spaceAfter=4),
+        ]),
         emp_tbl,
         Spacer(1, 3 * mm),
         earn_tbl,

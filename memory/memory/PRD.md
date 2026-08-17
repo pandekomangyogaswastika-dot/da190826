@@ -67,7 +67,7 @@
 ## 🔑 Test Credentials
 
 ```
-URL:      https://maklon-dispatch-fix.preview.emergentagent.com
+URL:      https://smart-preview-pdf.preview.emergentagent.com
 Email:    admin@garment.com
 Password: Admin@123
 Role:     Super Admin (semua akses)

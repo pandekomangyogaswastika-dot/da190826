@@ -1,42 +1,34 @@
 [
   {
-    "content": "UKUR: Fase D (Dashboard Marketing) — terbukti SUDAH selesai sesi #16 (INV-F20 hijau 8 invarian + layar), ROADMAP basi diperbaiki",
+    "content": "FASE 0: Penomoran Otomatis/Manual (SJ Gudang, PR, Jurnal) — gate INV-F25 8/8 HIJAU",
     "status": "completed"
   },
   {
-    "content": "Backend: registry doc_number — tandai `policy_enforced` (8 jenis) + kunci baru Pinjaman Karyawan (PIN)",
+    "content": "FASE 1: Satu koleksi pdf_templates + katalog 19 jenis dokumen + API + migrasi setelan lama",
     "status": "completed"
   },
   {
-    "content": "Backend: sambungkan issue_number ke Kasbon, Pinjaman, Invoice Maklon, Invoice AR, CMT-RCV",
+    "content": "FASE 2+3: Layar satu pintu 'PDF & Kop Surat' (kop/logo/kolom/TTD/footer) + pratinjau PDF di samping",
     "status": "completed"
   },
   {
-    "content": "Backend: API menolak perubahan mode untuk jenis yang belum ditegakkan (format tetap boleh)",
+    "content": "FASE 4: Template diterapkan ke SPP, SJ Vendor, Dispatch Buyer, Pick List, Surat Jalan Gudang, Invoice, Slip Gaji, Rekap SJ, 10 laporan",
     "status": "completed"
   },
   {
-    "content": "Frontend: komponen bersama DocNumberField + hook useDocNumberPolicy + helper docNumberPayload",
+    "content": "FASE 4b: Gate INV-F26 (9 invarian) + terdaftar di gate.sh",
     "status": "completed"
   },
   {
-    "content": "Frontend: DocNumberField dipasang di form Ajukan Kasbon/Pinjaman",
+    "content": "gate.sh PENUH: 44/44 PASS · 0 FAIL · 0 SKIP · VERDICT HIJAU",
     "status": "completed"
   },
   {
-    "content": "Frontend: layar Penomoran Dokumen jujur — 8 bisa diatur, 41 badge 'Otomatis saja'",
+    "content": "Testing agent frontend (39 uji lulus) + catatan LOW deep-link diperbaiki",
     "status": "completed"
   },
   {
-    "content": "Gate INV-F25 (7 invarian) — HIJAU + terdaftar di gate.sh",
-    "status": "completed"
-  },
-  {
-    "content": "Uji: agen uji 11 lulus / 0 bug + SELURUH gate suite 43/43 PASS · 0 FAIL · 0 SKIP · HIJAU",
-    "status": "completed"
-  },
-  {
-    "content": "Docs: plan.md SESI #18, CHANGELOG [#18], ROADMAP (D selesai + G separuh), HANDOFF #18, test_result.md",
+    "content": "plan.md, memory/SESI19_PDF_TEMPLATE.md, test_result.md diperbarui",
     "status": "completed"
   }
 ]

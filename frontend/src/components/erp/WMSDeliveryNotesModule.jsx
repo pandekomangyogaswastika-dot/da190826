@@ -21,6 +21,7 @@ import { toast } from 'sonner';
 import { EmptyState } from './EmptyState';
 import OnwardCTA from './OnwardCTA';
 import ExportCsvButton from '@/components/ui/export-csv-button';
+import DocNumberField, { useDocNumberPolicy, docNumberPayload } from './docnum/DocNumberField';
 
 /* F13 (sesi #11) — Surat Jalan sudah punya pencarian, tab, dan paginasi, tetapi
    hanya bisa dibaca sebagai KARTU dan TIDAK bisa diunduh. Dua pertanyaan harian
@@ -62,6 +63,14 @@ export default function WMSDeliveryNotesModule({ token, onNavigate }) {
   const headers = useMemo(() => ({ Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }), [token]);
   const [notes, setNotes] = useState([]);
   const [loading, setLoading] = useState(false);
+  // SESI #19 — kebijakan penomoran Surat Jalan Gudang (Otomatis/Manual) dibaca dari
+  // Administrasi Sistem → Penomoran Dokumen supaya layar & backend tidak bisa berbeda.
+  const [sjType, setSjType] = useState('');
+  const numPolicy = useDocNumberPolicy('wh_delivery_notes.sj_number', token,
+    // {TIPE} ikut menentukan nomor, jadi pratinjaunya harus memakai tipe yang
+    // BENAR-BENAR dipilih — bukan token contoh "TIP".
+    useMemo(() => ({ TIPE: sjType }), [sjType]));
+  const [sjNumber, setSjNumber] = useState('');
   const [tab, setTab] = useState('sources');
   // ── FASE H-7: daftar surat jalan LINTAS SUMBER ────────────────────────────
   // Sebelum ini layar ini hanya membaca `wh_delivery_notes` (2 dokumen demo),
@@ -179,7 +188,8 @@ export default function WMSDeliveryNotesModule({ token, onNavigate }) {
     e.preventDefault();
     const fd = new FormData(e.target);
     const data = {
-      sj_type: fd.get('sj_type'),
+      sj_type: sjType || fd.get('sj_type'),
+      ...docNumberPayload(numPolicy, 'sj_number', sjNumber),
       recipient_name: fd.get('recipient_name'),
       recipient_address: fd.get('recipient_address'),
       recipient_phone: fd.get('recipient_phone') || '',
@@ -190,14 +200,21 @@ export default function WMSDeliveryNotesModule({ token, onNavigate }) {
     };
     try {
       const r = await fetch(`${API}/api/wms/delivery-notes`, { method: 'POST', headers, body: JSON.stringify(data) });
-      if (!r.ok) throw new Error();
+      // SESI #19 — DULU semua kegagalan jadi satu pesan buta ("Gagal membuat surat
+      // jalan"). Dengan penomoran yang ditegakkan, penolakan justru berisi jalan
+      // keluarnya (pola nomor yang benar / nomor yang akan dipakai) — menelannya
+      // membuat pemakai mencoba berulang tanpa tahu apa yang salah.
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d?.detail || 'Gagal membuat surat jalan');
       toast.success('Surat jalan berhasil dibuat');
       setCreateDialog(false);
+      setSjNumber('');
+      setSjType('');
       setEditingLines([{ line_no: 1, description: '', qty: 0, unit: 'pcs', remarks: '' }]);
       setSelectedJobId('');
       load();
-    } catch {
-      toast.error('Gagal membuat surat jalan');
+    } catch (err) {
+      toast.error(err?.message || 'Gagal membuat surat jalan');
     }
   };
 
@@ -762,7 +779,7 @@ export default function WMSDeliveryNotesModule({ token, onNavigate }) {
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <Label>Tipe SJ *</Label>
-                  <Select name="sj_type" required>
+                  <Select name="sj_type" required value={sjType} onValueChange={setSjType}>
                     <SelectTrigger className="bg-foreground/5 border-foreground/10" data-testid="input-sj-type">
                       <SelectValue placeholder="Pilih tipe" />
                     </SelectTrigger>
@@ -780,6 +797,17 @@ export default function WMSDeliveryNotesModule({ token, onNavigate }) {
                   <Input name="recipient_name" required className="bg-foreground/5 border-foreground/10" data-testid="input-recipient-name" />
                 </div>
               </div>
+
+              {/* SESI #19 — kolom nomor mengikuti kebijakan Otomatis/Manual owner.
+                  Sebelum ini form tidak punya kolom nomor sama sekali, sehingga setelan
+                  MANUAL membuat surat jalan TIDAK BISA dibuat ("nomor wajib diisi"). */}
+              <DocNumberField
+                policy={numPolicy}
+                value={sjNumber}
+                onChange={setSjNumber}
+                label="Nomor Surat Jalan"
+                testId="sj-number"
+              />
 
               <div>
                 <Label>Alamat Penerima *</Label>

@@ -53,6 +53,7 @@ import uuid
 from datetime import datetime, timezone
 
 from auth import require_auth, serialize_doc, verify_token_str
+from core.doc_number_policy import issue_number
 from database import get_db
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
@@ -79,6 +80,8 @@ router = APIRouter(prefix="/api/wms/delivery-notes", tags=["wms-delivery-notes"]
 
 SJ_TYPES = ["SJ-CMT", "SJ-MAKLON", "SJ-SUPPLIER", "SJ-INTERNAL", "SJ-ONLINE"]
 SJ_STATUSES = ["draft", "issued", "received", "cancelled"]
+# SESI #19 — kunci kebijakan penomoran (registry `data/doc_number_registry.py`).
+SJ_DOCNUM_KEY = "wh_delivery_notes.sj_number"
 
 
 def _now(): return datetime.now(timezone.utc)
@@ -96,6 +99,10 @@ class SJLine(BaseModel):
 
 class SJIn(BaseModel):
     sj_type: str
+    # SESI #19 — kolom nomor hanya dipakai bila kebijakan penomoran Surat Jalan Gudang
+    # disetel MANUAL. Pada mode OTOMATIS, mengirim nomor DITOLAK (bukan diabaikan
+    # diam-diam) oleh `core.doc_number_policy.issue_number`.
+    sj_number: str = ""
     recipient_name: str = Field(..., min_length=1)
     recipient_address: str = ""
     recipient_phone: str = ""
@@ -124,10 +131,17 @@ class CancelIn(BaseModel):
 
 
 async def _next_sj_number(db, sj_type: str) -> str:
+    """Nomor SJ OTOMATIS — dipakai jalur yang tidak punya manusia di layarnya.
+
+    Satu-satunya pemakai sekarang: `routes/wms_cmt_dispatches.py::execute_dispatch`
+    (SJ-CMT lahir sendiri saat dispatch dieksekusi). Surat jalan yang DIBUAT ORANG
+    lewat `create_sj` memakai `issue_number` supaya kebijakan Otomatis/Manual owner
+    benar-benar berlaku — lihat catatan di `data/doc_number_registry.py`.
+    """
     prefix = f"{sj_type}/{_now().strftime('%Y/%m')}/"
     # RC-5 fix: atomic race-safe numbering (was count_documents()+1 -> dup/E11000)
     return await gen_prefixed_number(db, "wh_delivery_notes", "sj_number", prefix, 4,
-                                     ctx={"TIPE": sj_type})
+                                     ctx={"TIPE": sj_type}, config_key=SJ_DOCNUM_KEY)
 
 
 @router.get("")
@@ -174,7 +188,11 @@ async def create_sj(data: SJIn, request: Request):
         raise HTTPException(400, f"sj_type harus salah satu dari {SJ_TYPES}")
     sj_id = _id()
     now = _now()
-    sj_number = await _next_sj_number(db, data.sj_type)
+    # SESI #19 — SATU PINTU penomoran: menghormati mode Otomatis/Manual yang disetel
+    # owner di Administrasi Sistem → Penomoran Dokumen (dulu selalu otomatis, sehingga
+    # setelan MANUAL tersimpan tetapi tidak pernah berlaku).
+    sj_number = await issue_number(db, SJ_DOCNUM_KEY, ctx={"TIPE": data.sj_type},
+                                   requested=data.sj_number)
     lines = [{"line_no": i + 1, **line.dict()} for i, line in enumerate(data.lines)]
     doc = {
         "id": sj_id,
@@ -433,23 +451,37 @@ async def recap_pdf_all_sources(
             ("Jumlah dokumen", str(len(rows))),
         ],
         avail=CONTENT_W_LANDSCAPE)
-    headers = ["No", "No. Surat Jalan", "Sumber", "Jenis", "Tanggal", "Tujuan",
-               "Acuan (PO/Ref)", "Status", "Baris", "Total Qty"]
-    weights = [0.4, 1.7, 1.3, 1.4, 0.9, 2.0, 1.3, 1.0, 0.5, 0.8]
+    # SESI #19 — susunan kolom rekap mengikuti TEMPLATE PDF pemilik (tampil/urutan/
+    # lebar), sama seperti dokumen lain. Baris TOTAL dibangun PER KUNCI, bukan per
+    # indeks tetap: begitu kolom diurutkan ulang, total per indeks akan mendarat di
+    # kolom yang salah (cacat yang sama sudah pernah terjadi di surat jalan buyer).
+    from routes.operations_pdf_helpers import tpl_table_parts
+    all_keys = ["no", "sj_number", "source", "type", "date", "destination",
+                "reference", "status", "lines", "qty"]
+    all_headers = ["No", "No. Surat Jalan", "Sumber", "Jenis", "Tanggal", "Tujuan",
+                   "Acuan (PO/Ref)", "Status", "Baris", "Total Qty"]
     data = []
     for i, r in enumerate(rows, 1):
         data.append([i, r["number"], r["source_label"], r["doc_type"],
                      (r.get("date") or "")[:10], r["recipient"], r["reference"] or "-",
                      r["status"], r["lines"], f"{_f(r.get('qty')):,.2f}"])
-    if not data:
-        data = [["-", "tidak ada surat jalan pada filter ini", "", "", "", "", "", "", "", ""]]
+    headers, data, keys, weights, right_cols, doc_settings = await tpl_table_parts(
+        db, "delivery-note-recap", all_keys, all_headers, data,
+        numeric_keys=("no", "lines", "qty"))
+    if not rows:
+        data = [["-" if k == "no" else ("tidak ada surat jalan pada filter ini"
+                                        if k == "sj_number" else "") for k in keys]]
     else:
-        data.append(["", f"TOTAL {len(rows)} dokumen", "", "", "", "", "", "",
-                     sum(int(r.get("lines") or 0) for r in rows),
-                     f"{sum(_f(r.get('qty')) for r in rows):,.2f}"])
-    elements.append(_pdf_data_table(headers, data, weights=weights,
-                                    right_cols={0, 8, 9},
-                                    total_row=bool(rows), page="landscape"))
+        total_by_key = {
+            "sj_number": f"TOTAL {len(rows)} dokumen",
+            "lines": str(sum(int(r.get("lines") or 0) for r in rows)),
+            "qty": f"{sum(_f(r.get('qty')) for r in rows):,.2f}",
+        }
+        data.append([total_by_key.get(k, "") for k in keys])
+    elements.append(_pdf_data_table(
+        headers, data, weights=weights, right_cols=right_cols,
+        total_row=bool(rows), page="landscape",
+        style=(doc_settings.get("_template") or {}).get("table")))
     _pdf_footer_branded(elements, profile, doc_settings)
     buf = io.BytesIO()
     _build_pdf(buf, elements, page="landscape")
@@ -616,6 +648,19 @@ async def sj_pdf(
     request: Request,
     token: str | None = None,
 ):
+    """Surat Jalan cetak — SESI #19: DITULIS ULANG memakai TEMPLATE PDF pemilik.
+
+    Keluhan pemilik: "header surat sangat buruk sekali". Yang terukur pada versi
+    lama: kop digambar tangan dengan `canvas.drawString` pada koordinat milimeter
+    tetap (nama PT 9 pt, alamat DIPOTONG 70 karakter, tanpa telepon/NPWP, tanpa
+    LOGO sama sekali), tabelnya memakai 5 posisi X tetap sehingga uraian barang
+    dipotong 60 karakter dan tidak pernah melipat, dan blok tanda tangan dipaksa
+    maksimal 3 (`sig_defs[:3]`) dengan posisi X manual — blok ke-4 hilang tanpa pesan.
+
+    Versi ini memakai fondasi yang sama dengan dokumen lain (platypus + template):
+    kop bisa berlogo, kolom tabel bisa diatur & diurutkan, teks melipat rapi tanpa
+    tumpang tindih (dijaga INV-F17), dan jumlah blok tanda tangan mengikuti setelan.
+    """
     if token:
         user = verify_token_str(token)
         if not user:
@@ -630,152 +675,80 @@ async def sj_pdf(
     if not REPORTLAB_OK:
         raise HTTPException(500, "ReportLab tidak tersedia")
 
-    profile = await get_company_profile(db)
-    doc_settings = await get_doc_settings(db, "delivery-note")
+    from core.pdf_template import (footer_flowables, header_flowables,
+                                   signature_flowables)
+    from routes.operations_pdf_helpers import (CONTENT_W_PORTRAIT, _build_pdf,
+                                               _pdf_data_table, tpl_table_parts)
 
-    buf = io.BytesIO()
-    W, H = A4
-    c = canvas.Canvas(buf, pagesize=A4)
-
-    def draw_line(y_):
-        c.setStrokeColor(colors.HexColor("#dee2e6"))
-        c.line(15 * mm, y_, W - 15 * mm, y_)
-
-    # ── Header ──
-    c.setFont("Helvetica-Bold", 14)
-    c.drawString(15 * mm, H - 20 * mm, "SURAT JALAN")
-    c.setFont("Helvetica", 9)
-    c.drawString(15 * mm, H - 27 * mm, profile.get("company_name") or "CV. DEWI ADITYA")
-    _addr = profile.get("address") or "Jl. Industri Garmen No. 1, Indonesia"
-    c.drawString(15 * mm, H - 32 * mm, _addr[:70])
-
-    # SJ Number & type
-    c.setFont("Helvetica-Bold", 10)
-    c.drawRightString(W - 15 * mm, H - 20 * mm, sj.get("sj_number", ""))
-    c.setFont("Helvetica", 8)
-    sj_type_labels = {
+    SJ_TYPE_LABELS = {
         "SJ-CMT": "Pengiriman ke CMT",
         "SJ-MAKLON": "Pengiriman ke Klien Maklon",
         "SJ-SUPPLIER": "Retur ke Supplier",
         "SJ-INTERNAL": "Transfer Internal",
         "SJ-ONLINE": "Pengiriman Online Shop",
     }
-    c.drawRightString(W - 15 * mm, H - 27 * mm, sj_type_labels.get(sj.get("sj_type", ""), sj.get("sj_type", "")))
     issued_at = sj.get("issued_at") or sj.get("created_at")
     if hasattr(issued_at, "strftime"):
-        c.drawRightString(W - 15 * mm, H - 32 * mm, issued_at.strftime("%d/%m/%Y"))
-    elif isinstance(issued_at, str):
-        c.drawRightString(W - 15 * mm, H - 32 * mm, issued_at[:10])
+        tanggal = issued_at.strftime("%d/%m/%Y")
+    else:
+        tanggal = str(issued_at or "")[:10]
 
-    draw_line(H - 36 * mm)
-
-    # Recipient
-    y = H - 43 * mm
-    c.setFont("Helvetica-Bold", 8)
-    c.drawString(15 * mm, y, "KEPADA:")
-    c.setFont("Helvetica", 8)
-    c.drawString(35 * mm, y, sj.get("recipient_name", ""))
-    y -= 5 * mm
-    if sj.get("recipient_address"):
-        c.drawString(35 * mm, y, sj["recipient_address"][:80])
-        y -= 5 * mm
-    if sj.get("recipient_phone"):
-        c.drawString(35 * mm, y, f"Telp: {sj['recipient_phone']}")
-        y -= 5 * mm
-    if sj.get("reference_no"):
-        c.setFont("Helvetica-Bold", 8)
-        c.drawString(15 * mm, y, "REF:")
-        c.setFont("Helvetica", 8)
-        c.drawString(35 * mm, y, f"{sj.get('reference_type', '').upper()} {sj['reference_no']}")
-        y -= 5 * mm
-
-    draw_line(y - 2 * mm)
-    y -= 8 * mm
-
-    # Table header
-    c.setFont("Helvetica-Bold", 8)
-    col_x = [15 * mm, 20 * mm, 130 * mm, 155 * mm, 170 * mm]
-    c.drawString(col_x[0], y, "No")
-    c.drawString(col_x[1], y, "Deskripsi Barang")
-    c.drawString(col_x[2], y, "Qty")
-    c.drawString(col_x[3], y, "Satuan")
-    c.drawString(col_x[4], y, "Keterangan")
-    y -= 4 * mm
-    draw_line(y)
-    y -= 5 * mm
-
-    # Lines
-    c.setFont("Helvetica", 8)
+    all_keys = ['no', 'material_code', 'description', 'roll_no', 'qty', 'unit', 'remarks']
+    all_headers = ['No', 'Kode Material', 'Uraian Barang', 'No. Roll', 'Qty', 'Satuan',
+                   'Keterangan']
+    rows = []
     for line in sj.get("lines", []):
-        if y < 50 * mm:
-            c.showPage()
-            y = H - 20 * mm
-            c.setFont("Helvetica", 8)
-        c.drawString(col_x[0], y, str(line.get("line_no", "")))
-        desc = str(line.get("description", ""))[:60]
-        c.drawString(col_x[1], y, desc)
-        c.drawRightString(col_x[2] + 15 * mm, y, f"{float(line.get('qty', 0)):,.2f}")
-        c.drawString(col_x[3], y, str(line.get("unit", "")))
-        c.drawString(col_x[4], y, str(line.get("remarks", ""))[:25])
-        y -= 6 * mm
+        rows.append([
+            line.get("line_no", ""), line.get("material_code", ""),
+            line.get("description", ""), line.get("roll_no", ""),
+            f"{float(line.get('qty', 0) or 0):,.2f}".replace(",", "."),
+            line.get("unit", ""), line.get("remarks", ""),
+        ])
 
-    draw_line(y)
-    y -= 10 * mm
+    headers, rows2, keys, weights, right_cols, doc_settings = await tpl_table_parts(
+        db, 'delivery-note', all_keys, all_headers, rows, numeric_keys=('qty',))
+    tpl = (doc_settings or {}).get('_template') or {}
+    profile = await get_company_profile(db)
 
-    # Notes
+    info = [
+        ("No. Surat Jalan", sj.get("sj_number", "")),
+        ("Tanggal", tanggal),
+        ("Jenis", SJ_TYPE_LABELS.get(sj.get("sj_type", ""), sj.get("sj_type", ""))),
+        ("Status", sj.get("status", "")),
+        ("Kepada", sj.get("recipient_name", "")),
+        ("Alamat", sj.get("recipient_address", "")),
+    ]
+    if sj.get("recipient_phone"):
+        info.append(("Telepon", sj["recipient_phone"]))
+    if sj.get("reference_no"):
+        info.append((f"Acuan ({(sj.get('reference_type') or '-').upper()})",
+                     sj["reference_no"]))
+    info.append(("No. Kendaraan", sj.get("vehicle_no") or "-"))
+    info.append(("Pengirim", sj.get("shipper_name") or "-"))
+
+    elements = header_flowables(tpl.get('header'), profile, "SURAT JALAN",
+                                info_pairs=info, avail=CONTENT_W_PORTRAIT)
+    if headers:
+        elements.append(_pdf_data_table(headers, rows2, weights=weights,
+                                        right_cols=right_cols, style=tpl.get('table')))
+
+    from reportlab.lib.styles import ParagraphStyle
+    from reportlab.platypus import Paragraph, Spacer
     if sj.get("notes"):
-        c.setFont("Helvetica-Oblique", 7)
-        c.drawString(15 * mm, y, f"Catatan: {sj['notes'][:100]}")
-        y -= 8 * mm
+        elements.append(Spacer(1, 4 * mm))
+        elements.append(Paragraph(
+            f"<b>Catatan:</b> {str(sj['notes'])[:300]}",
+            ParagraphStyle("sjNote", fontSize=8, leading=10.5)))
 
-    # Signatures (configurable — P1d)
-    if doc_settings.get("show_signatures", True):
-        sig_context = {
-            "issued_by": sj.get("shipper_name") or sj.get("issued_by_name", ""),
-            "recipient_name": sj.get("recipient_name", ""),
-            "driver_name": sj.get("driver_name") or sj.get("shipper_name", ""),
-            "sj_number": sj.get("sj_number", ""),
-        }
-        sig_defs = doc_settings.get("signatures") or [
-            {"label": "Pengirim", "name_source": "field", "field_key": "issued_by"},
-            {"label": "Penerima", "name_source": "blank", "field_key": "recipient_name"},
-            {"label": "Mengetahui", "name_source": "blank"},
-        ]
-        sig_defs = sig_defs[:3]  # maks 3 kolom di halaman
-        n = len(sig_defs)
-        xs = [15 * mm, W / 2 - 20 * mm, W - 15 * mm][:n] if n <= 3 else []
-        aligns = ["L", "L", "R"][:n]
-        y = max(30 * mm, y - 10 * mm)
-        c.setFont("Helvetica", 8)
-        for i, sd in enumerate(sig_defs):
-            label = sd.get("label", "")
-            if aligns[i] == "R":
-                c.drawRightString(xs[i], y, label)
-            else:
-                c.drawString(xs[i], y, label)
-        y -= 18 * mm
-        c.setFont("Helvetica", 8)
-        for i, sd in enumerate(sig_defs):
-            nm = resolve_signature_name(sd, sig_context)
-            line = f"({nm})" if nm else "(.......................)"
-            if aligns[i] == "R":
-                c.drawRightString(xs[i], y, line)
-            else:
-                c.drawString(xs[i], y, line)
-        # role label kecil di bawah nama
-        c.setFont("Helvetica", 6)
-        for i, sd in enumerate(sig_defs):
-            role = sd.get("role_label", "")
-            if role:
-                if aligns[i] == "R":
-                    c.drawRightString(xs[i], y - 4 * mm, role)
-                else:
-                    c.drawString(xs[i], y - 4 * mm, role)
-        c.setFont("Helvetica", 7)
-        c.drawString(15 * mm, y - 9 * mm, f"Kendaraan: {sj.get('vehicle_no', '-')}")
+    elements.extend(signature_flowables(tpl.get('signatures'), {
+        "issued_by": sj.get("shipper_name") or sj.get("created_by", ""),
+        "recipient_name": sj.get("recipient_name", ""),
+        "driver_name": sj.get("driver_name") or sj.get("shipper_name", ""),
+        "sj_number": sj.get("sj_number", ""),
+    }, avail=CONTENT_W_PORTRAIT))
+    elements.extend(footer_flowables(tpl.get('footer'), profile))
 
-    c.save()
-    buf.seek(0)
+    buf = _build_pdf(io.BytesIO(), elements)
     filename = f"surat-jalan-{sj.get('sj_number', sj_id).replace('/', '-')}.pdf"
     preview = request.query_params.get("preview") in ("1", "true", "yes")
     disposition = "inline" if preview else "attachment"

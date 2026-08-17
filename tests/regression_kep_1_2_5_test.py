@@ -13,7 +13,7 @@ import sys
 import json
 from datetime import datetime
 
-BASE_URL = "https://maklon-dispatch-fix.preview.emergentagent.com"
+BASE_URL = "https://smart-preview-pdf.preview.emergentagent.com"
 ADMIN_EMAIL = "admin@garment.com"
 ADMIN_PASSWORD = "Admin@123"
 

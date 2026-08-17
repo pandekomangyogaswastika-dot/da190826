@@ -1,9 +1,15 @@
 # ruff: noqa: F401
 """
-operations_pdf_configs.py — PDF Export Configuration Management
+operations_pdf_configs.py — PDF Export Configuration Management (WARISAN)
 Endpoints: /api/pdf-export-columns, /api/pdf-export-configs (CRUD)
 
 Refactored: Session #11.19 Phase 3.2.6 (split from operations_export.py 1277 LOC)
+
+SESI #19 — layar barunya adalah "PDF & Kop Surat" (`/api/pdf-templates`) dan
+sumber kebenaran kolom pindah ke `data/pdf_doc_registry.py`. Endpoint di berkas ini
+DIPERTAHANKAN karena masih dipakai skrip/uji lama dan sebagai arsip konfigurasi
+kolom bernama; definisi kolomnya kini DIIMPOR dari registry supaya tidak ada dua
+daftar kolom yang bisa berbeda pendapat tentang dokumen yang sama.
 """
 import logging
 import uuid
@@ -12,171 +18,12 @@ from database import get_db
 from auth import require_auth, serialize_doc, log_activity
 from datetime import datetime, timezone
 
+from data.pdf_doc_registry import PDF_COLUMN_DEFINITIONS  # noqa: F401  (SSOT kolom)
+
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api", tags=["operations-pdf-configs"])
 
-# PDF Column Definitions for each report type
-PDF_COLUMN_DEFINITIONS = {
-    'production-po': [
-        {'key': 'no', 'label': 'No', 'required': True},
-        {'key': 'serial', 'label': 'Serial No'},
-        {'key': 'product', 'label': 'Product Name'},
-        {'key': 'sku', 'label': 'SKU'},
-        {'key': 'size', 'label': 'Size'},
-        {'key': 'color', 'label': 'Color'},
-        {'key': 'qty', 'label': 'Quantity', 'required': True},
-        {'key': 'price', 'label': 'Selling Price'},
-        {'key': 'cmt', 'label': 'CMT Price'},
-    ],
-    'vendor-shipment': [
-        {'key': 'no', 'label': 'No', 'required': True},
-        {'key': 'po', 'label': 'PO Number'},
-        {'key': 'serial', 'label': 'Serial No'},
-        {'key': 'product', 'label': 'Product Name'},
-        {'key': 'sku', 'label': 'SKU'},
-        {'key': 'size', 'label': 'Size'},
-        {'key': 'color', 'label': 'Color'},
-        {'key': 'qty_sent', 'label': 'Qty Sent', 'required': True},
-    ],
-    'buyer-shipment-dispatch': [
-        {'key': 'no', 'label': 'No', 'required': True},
-        {'key': 'serial', 'label': 'Serial No'},
-        {'key': 'product', 'label': 'Product Name'},
-        {'key': 'sku', 'label': 'SKU'},
-        {'key': 'size', 'label': 'Size'},
-        {'key': 'color', 'label': 'Color'},
-        {'key': 'ordered', 'label': 'Ordered Qty'},
-        {'key': 'this_dispatch', 'label': 'This Dispatch'},
-        {'key': 'cumul_shipped', 'label': 'Cumulative Shipped'},
-        {'key': 'remaining', 'label': 'Remaining'},
-    ],
-    'production-report': [
-        {'key': 'no', 'label': 'No', 'required': True},
-        {'key': 'date', 'label': 'Date'},
-        {'key': 'po', 'label': 'PO Number'},
-        {'key': 'serial', 'label': 'Serial No'},
-        {'key': 'product', 'label': 'Product Name'},
-        {'key': 'sku', 'label': 'SKU'},
-        {'key': 'size', 'label': 'Size'},
-        {'key': 'color', 'label': 'Color'},
-        {'key': 'qty', 'label': 'Quantity'},
-        {'key': 'price', 'label': 'Price'},
-        {'key': 'cmt', 'label': 'CMT'},
-        {'key': 'vendor', 'label': 'Vendor'},
-        {'key': 'produced', 'label': 'Produced'},
-        {'key': 'shipped', 'label': 'Shipped'},
-    ],
-    'report-production': [
-        {'key': 'no', 'label': 'No', 'required': True},
-        {'key': 'tanggal', 'label': 'Tanggal'},
-        {'key': 'no_po', 'label': 'No PO'},
-        {'key': 'no_seri', 'label': 'Serial'},
-        {'key': 'nama_produk', 'label': 'Produk'},
-        {'key': 'sku', 'label': 'SKU'},
-        {'key': 'size', 'label': 'Size'},
-        {'key': 'warna', 'label': 'Warna'},
-        {'key': 'output_qty', 'label': 'Qty'},
-        {'key': 'harga', 'label': 'Harga'},
-        {'key': 'hpp', 'label': 'HPP/CMT'},
-        {'key': 'garment', 'label': 'Vendor'},
-        {'key': 'po_status', 'label': 'Status'},
-    ],
-    'report-progress': [
-        {'key': 'no', 'label': 'No', 'required': True},
-        {'key': 'date', 'label': 'Tanggal'},
-        {'key': 'job_number', 'label': 'Job'},
-        {'key': 'po_number', 'label': 'PO'},
-        {'key': 'vendor_name', 'label': 'Vendor'},
-        {'key': 'serial_number', 'label': 'Serial'},
-        {'key': 'sku', 'label': 'SKU'},
-        {'key': 'product_name', 'label': 'Produk'},
-        {'key': 'qty_progress', 'label': 'Qty'},
-        {'key': 'notes', 'label': 'Catatan'},
-        {'key': 'recorded_by', 'label': 'Dicatat oleh'},
-    ],
-    'report-financial': [
-        {'key': 'no', 'label': 'No', 'required': True},
-        {'key': 'invoice_number', 'label': 'Invoice No'},
-        {'key': 'category', 'label': 'Category'},
-        {'key': 'po_number', 'label': 'PO'},
-        {'key': 'vendor_or_buyer', 'label': 'Vendor/Buyer'},
-        {'key': 'amount', 'label': 'Amount'},
-        {'key': 'paid', 'label': 'Paid'},
-        {'key': 'remaining', 'label': 'Remaining'},
-        {'key': 'status', 'label': 'Status'},
-        {'key': 'date', 'label': 'Date'},
-    ],
-    'report-shipment': [
-        {'key': 'no', 'label': 'No', 'required': True},
-        {'key': 'direction', 'label': 'Direction'},
-        {'key': 'shipment_number', 'label': 'Shipment No'},
-        {'key': 'shipment_type', 'label': 'Type'},
-        {'key': 'vendor_name', 'label': 'Vendor'},
-        {'key': 'status', 'label': 'Status'},
-        {'key': 'inspection', 'label': 'Inspection'},
-        {'key': 'date', 'label': 'Date'},
-        {'key': 'total_qty', 'label': 'Qty'},
-        {'key': 'items', 'label': 'Items'},
-    ],
-    'report-defect': [
-        {'key': 'no', 'label': 'No', 'required': True},
-        {'key': 'date', 'label': 'Tanggal'},
-        {'key': 'sku', 'label': 'SKU'},
-        {'key': 'product_name', 'label': 'Produk'},
-        {'key': 'size', 'label': 'Size'},
-        {'key': 'color', 'label': 'Warna'},
-        {'key': 'defect_qty', 'label': 'Qty Defect'},
-        {'key': 'defect_type', 'label': 'Tipe'},
-        {'key': 'description', 'label': 'Deskripsi'},
-        {'key': 'status', 'label': 'Status'},
-    ],
-    'report-return': [
-        {'key': 'no', 'label': 'No', 'required': True},
-        {'key': 'return_number', 'label': 'Return No'},
-        {'key': 'po_number', 'label': 'PO'},
-        {'key': 'customer_name', 'label': 'Customer'},
-        {'key': 'return_date', 'label': 'Date'},
-        {'key': 'total_qty', 'label': 'Total Qty'},
-        {'key': 'item_count', 'label': 'Items'},
-        {'key': 'reason', 'label': 'Reason'},
-        {'key': 'status', 'label': 'Status'},
-    ],
-    'report-missing-material': [
-        {'key': 'no', 'label': 'No', 'required': True},
-        {'key': 'request_number', 'label': 'Request No'},
-        {'key': 'vendor_name', 'label': 'Vendor'},
-        {'key': 'po_number', 'label': 'PO'},
-        {'key': 'total_qty', 'label': 'Qty'},
-        {'key': 'reason', 'label': 'Reason'},
-        {'key': 'status', 'label': 'Status'},
-        {'key': 'child_shipment', 'label': 'Child Shipment'},
-        {'key': 'date', 'label': 'Date'},
-    ],
-    'report-replacement': [
-        {'key': 'no', 'label': 'No', 'required': True},
-        {'key': 'request_number', 'label': 'Request No'},
-        {'key': 'vendor_name', 'label': 'Vendor'},
-        {'key': 'po_number', 'label': 'PO'},
-        {'key': 'total_qty', 'label': 'Qty'},
-        {'key': 'reason', 'label': 'Reason'},
-        {'key': 'status', 'label': 'Status'},
-        {'key': 'child_shipment', 'label': 'Child Shipment'},
-        {'key': 'date', 'label': 'Date'},
-    ],
-    'report-accessory': [
-        {'key': 'no', 'label': 'No', 'required': True},
-        {'key': 'shipment_number', 'label': 'Shipment'},
-        {'key': 'vendor_name', 'label': 'Vendor'},
-        {'key': 'po_number', 'label': 'PO'},
-        {'key': 'date', 'label': 'Date'},
-        {'key': 'accessory_name', 'label': 'Accessory'},
-        {'key': 'accessory_code', 'label': 'Code'},
-        {'key': 'qty_sent', 'label': 'Qty'},
-        {'key': 'unit', 'label': 'Unit'},
-        {'key': 'status', 'label': 'Status'},
-    ],
-}
 
 
 @router.get("/pdf-export-columns")

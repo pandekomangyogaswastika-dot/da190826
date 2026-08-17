@@ -19,6 +19,7 @@ import {
 import { formatRupiah } from '@/lib/format';
 import ExportCsvButton from '@/components/ui/export-csv-button';
 import PaginationLite from '@/components/ui/pagination-lite';
+import DocNumberField, { useDocNumberPolicy, docNumberPayload } from './docnum/DocNumberField';
 
 const API = process.env.REACT_APP_BACKEND_URL;
 
@@ -142,7 +143,12 @@ function CreatePRModal({ onClose, onCreated, token }) {
   const [form, setForm] = useState({
     title: '', description: '', justification: '',
     priority: 'medium', request_type: 'consumable', department: '',
+    request_number: '',
   });
+  // SESI #19 — kebijakan penomoran PR (Otomatis/Manual) dibaca dari Administrasi
+  // Sistem → Penomoran Dokumen. Tanpa ini, setelan MANUAL membuat PR tidak bisa
+  // dibuat (backend menolak "nomor wajib diisi" atas setelan yang tak terlihat).
+  const numPolicy = useDocNumberPolicy('dewi_procurement_requests.request_number', token);
   const [items, setItems] = useState([{ material_id: '', name: '', specification: '', qty: 1, unit: 'pcs', estimated_price: 0, notes: '' }]);
   const [materials, setMaterials] = useState([]);
   const [uomMap, setUomMap] = useState({});
@@ -238,10 +244,15 @@ function CreatePRModal({ onClose, onCreated, token }) {
   const submit = async () => {
     if (!form.title.trim()) return setError('Judul wajib diisi');
     if (!items[0].name.trim()) return setError('Minimal 1 item harus diisi');
+    if (numPolicy?.mode === 'manual' && !form.request_number.trim()) {
+      return setError(`Nomor PR wajib diisi (pola ${numPolicy.format}).`);
+    }
     setSaving(true); setError('');
     try {
+      const { request_number: _rn, ...rest } = form;
       await axios.post(`${API}/api/procurement/requests`, {
-        ...form,
+        ...rest,
+        ...docNumberPayload(numPolicy, 'request_number', form.request_number),
         items: items.map((it) => ({
           material_id: it.material_id || undefined,
           name: it.name,
@@ -271,6 +282,15 @@ function CreatePRModal({ onClose, onCreated, token }) {
         <div className="p-5 space-y-4">
           {error && <div className="text-red-700 dark:text-red-400 text-sm bg-red-50 dark:bg-red-400/10 border border-red-300 dark:border-red-400/20 rounded-lg px-3 py-2">{error}</div>}
           <div className="grid grid-cols-2 gap-3">
+            <div className="col-span-2">
+              <DocNumberField
+                policy={numPolicy}
+                value={form.request_number}
+                onChange={(v) => setForm(p => ({ ...p, request_number: v }))}
+                label="Nomor PR"
+                testId="pr-number"
+              />
+            </div>
             <div className="col-span-2">
               <label className="text-xs text-muted-foreground mb-1 block">Judul Permintaan *</label>
               <input className={inp} placeholder="mis. Pembelian Laptop Karyawan Baru" value={form.title} onChange={e => setForm(p=>({...p,title:e.target.value}))} />

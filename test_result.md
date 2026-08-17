@@ -1029,7 +1029,7 @@ frontend:
           7) **Zero-regression check:** hash `#marketing-orders` + reload masih render UnifiedOrdersDashboard (jangan sampai kena efek samping perubahan registry).
 
           Kredensial: `admin@garment.com` / `Admin@123`.
-          URL preview: `REACT_APP_BACKEND_URL` di `frontend/.env` (https://maklon-dispatch-fix.preview.emergentagent.com).
+          URL preview: `REACT_APP_BACKEND_URL` di `frontend/.env` (https://smart-preview-pdf.preview.emergentagent.com).
 
       - working: false
         agent: "testing"
@@ -7567,8 +7567,8 @@ Excel/PDF, kirim reminder.
 
 ## metadata:
   created_by: "main_agent"
-  version: "1.6"
-  test_sequence: 54
+  version: "1.7"
+  test_sequence: 55
   run_ui: true
 
 ## agent_communication
@@ -7586,3 +7586,65 @@ Excel/PDF, kirim reminder.
       terlihat jelas" saat uji — main agent sudah membuktikan sebaliknya lewat screenshot (keempat
       kartu terisi: TARGET VS OMZET 3.7%, ANGGARAN 61.7%, ROAS 0.36×, PERLU PERHATIAN 6 merah),
       jadi ini artefak viewport/timing pada uji, bukan cacat produk.
+
+## SESI #19 (2026-08-17/18) — TEMPLATE PDF SATU PINTU + PENOMORAN LANJUTAN
+
+  - task: "FASE 0 — penomoran Otomatis/Manual: Surat Jalan Gudang · PR Pengadaan · Jurnal Umum"
+    implemented: true
+    working: true
+    file: "backend/data/doc_number_registry.py, backend/routes/wms_delivery_notes.py, backend/routes/dewi_procurement.py, backend/routes/rahaza_journals.py, frontend/src/components/erp/{WMSDeliveryNotesModule,ProcurementRequestModule,RahazaJournalEntryModule}.jsx"
+    stuck_count: 0
+    priority: "high"
+    status_history:
+        -working: true
+        -agent: "main"
+        -comment: |
+          Pola Fase G diulang 4 langkah per jenis. Gate INV-F25 kini 8 invarian (G8 baru:
+          bukti pada DOKUMEN SUNGGUHAN — otomatis menolak nomor ketikan, manual menolak
+          kosong/pola bebas/nomor kembar untuk ketiga jenis). Cacat ikutan yang ditemukan
+          & diperbaiki: pola nomor manual menolak tanda hubung (mode MANUAL Surat Jalan
+          MUSTAHIL dipakai), pratinjau nomor `TIP/2026/08/0001` yang tidak pernah lahir,
+          daftar jenis ditegakkan yang hardcode di pesan penolakan, nomor jurnal manual
+          yang diganti diam-diam saat bentrok, dan kunci uji G4 yang jadi salah sasaran.
+
+  - task: "FASE 1–3 — layar SATU PINTU 'PDF & Kop Surat' + pratinjau PDF di samping"
+    implemented: true
+    working: true
+    file: "backend/data/pdf_doc_registry.py, backend/core/pdf_template.py, backend/routes/pdf_templates.py, backend/utils/pdf_common.py, frontend/src/components/erp/pdf/PdfTemplateStudio.jsx, frontend/src/components/erp/hubs/ManagementSystemHub.jsx"
+    stuck_count: 0
+    priority: "high"
+    status_history:
+        -working: true
+        -agent: "main"
+        -comment: |
+          Dua tab PDF lama (kolom tabel + surat/TTD, dua koleksi) dilebur jadi SATU layar +
+          SATU koleksi `pdf_templates` (global + override per dokumen) dengan katalog gabungan
+          19 jenis dokumen. Kop bisa berlogo (base64 ≤700 KB, divalidasi), kolom bisa
+          show/hide + DIURUTKAN + ditambah, blok tanda tangan bisa >3 (subject/ruang/nama).
+          Pratinjau = PDF sungguhan dari backend (mode Gambar via pymupdf sebagai bawaan
+          karena penampil PDF browser tidak selalu ada). Migrasi setelan lama idempoten.
+        -working: true
+        -agent: "testing"
+        -comment: |
+          Agen uji frontend: 39 uji lulus, 0 bug UI/integrasi. Satu catatan LOW (deep-link
+          `#mgmt-pdf` tidak menampilkan tab tetangga) sudah DIPERBAIKI main agent: `mgmt-pdf`
+          kini makeRedirect ke tab hub + petunjuk tab hub tidak lagi hangus saat hub
+          ter-mount ulang setelah login.
+
+  - task: "FASE 4 — 5 PDF tersering memakai template + gate INV-F26"
+    implemented: true
+    working: true
+    file: "backend/routes/operations_pdf.py, backend/routes/operations_pdf_helpers.py, backend/routes/wms_picklist.py, backend/routes/wms_delivery_notes.py, backend/utils/invoice_pdf.py, backend/routes/rahaza_payroll_payslips.py, scripts/verify_fase_i_pdf_template.py"
+    stuck_count: 0
+    priority: "high"
+    status_history:
+        -working: true
+        -agent: "main"
+        -comment: |
+          SPP · SJ Vendor · Dispatch Buyer (kolom kini bisa diurutkan) · Pick List (DITULIS
+          ULANG — dulu tanpa kop sama sekali) · Surat Jalan Gudang (DITULIS ULANG dari canvas
+          ke platypus+template) · Invoice Maklon · kop Slip Gaji. Gate baru INV-F26 (P1–P8)
+          mengukur dari PDF JADI dan sempat MERAH 3× — menemukan cacat nyata milik kode baru:
+          leading kop 1,22× font (nama PT bersinggungan dengan alamat di SEMUA dokumen) dan
+          `save()` yang menghapus isian lain saat menerima patch sebagian. Keduanya diperbaiki.
+          BUKTI: `bash scripts/gate.sh` VERDICT HIJAU — 44/44 gate PASS, 0 FAIL, 0 SKIP.

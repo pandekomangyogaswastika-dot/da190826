@@ -198,7 +198,14 @@ async def get_invoice_pdf(invoice_id: str, user: dict = Depends(require_auth)):
         raise HTTPException(404, 'Invoice tidak ditemukan')
     cl = await db.dewi_maklon_clients.find_one({'id': inv.get('client_id')}) or {}
     co = await db.company_settings.find_one({}) or {}
-    pdf = build_invoice_pdf(invoice=inv, client=cl, company=co)
+    # SESI #19 — kop/kolom/tanda tangan/footer invoice mengikuti TEMPLATE PDF pemilik
+    # (layar "PDF & Kop Surat"). Tanpa ini invoice tetap memakai kop tanam kode
+    # tanpa logo/NPWP sementara dokumen lain sudah mengikuti setelan.
+    from utils.pdf_common import get_company_profile, get_doc_settings
+    _ds = await get_doc_settings(db, 'invoice-maklon')
+    pdf = build_invoice_pdf(invoice=inv, client=cl, company=co,
+                            template=(_ds or {}).get('_template'),
+                            profile=await get_company_profile(db))
     return Response(
         content=pdf,
         media_type='application/pdf',

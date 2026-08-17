@@ -97,7 +97,9 @@ const UserManagementModule  = lazy(() => import('./UserManagementModule'));
 const RoleManagementModule  = lazy(() => import('./RoleManagementModule'));
 const ActivityLogModule     = lazy(() => import('./ActivityLogModule'));
 const CompanySettingsModule = lazy(() => import('./CompanySettingsModule'));
-const PDFConfigModule       = lazy(() => import('./PDFConfigModule'));
+// SESI #19 — layar PDF SATU PINTU hidup sebagai TAB hub Pengaturan Sistem
+// (`hubs/ManagementSystemHub.jsx`), jadi registry ini hanya mengarahkan deep-link
+// lamanya ke sana; tidak ada impor langsung supaya isinya tidak punya dua pintu.
 // Legacy HelpGuideModule replaced by RahazaUserGuideModule (Sprint 26)
 
 // Warehouse
@@ -611,7 +613,15 @@ export const MODULE_REGISTRY = {
   'mgmt-role-matrix':  makeRedirect('mgmt-access-hub', 'roles'),
   'mgmt-activity':     ActivityLogModule,
   'mgmt-company':      CompanySettingsModule,
-  'mgmt-pdf':          PDFConfigModule,
+  // SESI #19 — 'mgmt-pdf' & kawan-kawannya MENGARAH ke hub Pengaturan Sistem pada
+  // tab 'pdf' (pola `makeRedirect` yang sama dipakai deep-link lama lainnya).
+  // Alasannya bukan gaya: bila layar ini juga dipasang sebagai modul langsung,
+  // isi yang sama punya DUA pintu (tab hub + menu langsung) — tepat pelanggaran
+  // yang dijaga guard NAV-DUPTAB, dan pemakai yang masuk lewat deep-link kehilangan
+  // tab tetangganya (Perusahaan, API Keys) tanpa tahu kenapa.
+  'mgmt-pdf':          makeRedirect('mgmt-system-hub', 'pdf'),
+  'mgmt-pdf-doc':      makeRedirect('mgmt-system-hub', 'pdf'),
+  'sys-pdf-templates': makeRedirect('mgmt-system-hub', 'pdf'),
   'mgmt-help':         RahazaUserGuideModule,
 
   // Warehouse

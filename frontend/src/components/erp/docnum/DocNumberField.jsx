@@ -25,19 +25,29 @@ import { useEffect, useState } from 'react';
 
 const API = process.env.REACT_APP_BACKEND_URL || '';
 
-/** Baca kebijakan penomoran satu jenis dokumen. `null` = belum tahu / gagal baca. */
-export function useDocNumberPolicy(key, token) {
+/** Baca kebijakan penomoran satu jenis dokumen. `null` = belum tahu / gagal baca.
+ *
+ * `ctx` (SESI #19) = token konteks yang mempengaruhi nomor, mis. `{ TIPE: 'SJ-INTERNAL' }`
+ * untuk Surat Jalan. Tanpa itu pratinjau memakai token contoh ("TIP/2026/08/0001") —
+ * nomor yang tidak akan pernah lahir.
+ */
+export function useDocNumberPolicy(key, token, ctx) {
   const [policy, setPolicy] = useState(null);
+  const ctxKey = JSON.stringify(ctx || {});
   useEffect(() => {
     if (!key) return;
     let alive = true;
     const headers = token ? { Authorization: `Bearer ${token}` } : {};
-    fetch(`${API}/api/doc-number-policy?key=${encodeURIComponent(key)}`, { headers })
+    const q = new URLSearchParams({ key });
+    Object.entries(JSON.parse(ctxKey)).forEach(([k, v]) => {
+      if (v) q.set(`ctx_${k}`, v);
+    });
+    fetch(`${API}/api/doc-number-policy?${q.toString()}`, { headers })
       .then(r => (r.ok ? r.json() : null))
       .then(d => { if (alive) setPolicy(d); })
       .catch(() => { if (alive) setPolicy(null); });
     return () => { alive = false; };
-  }, [key, token]);
+  }, [key, token, ctxKey]);
   return policy;
 }
 

@@ -12,7 +12,8 @@ from fastapi import APIRouter, Request, HTTPException, Query, Depends
 from routes.shared import require_portal_dep
 from database import get_db
 from auth import require_auth, serialize_doc, log_activity
-from utils.counters import gen_prefixed_number
+from utils.counters import gen_prefixed_number  # noqa: F401  (dipakai jalur lain)
+from core.doc_number_policy import issue_number
 from pymongo.errors import DuplicateKeyError
 import uuid
 from datetime import datetime, timezone, date
@@ -22,6 +23,8 @@ router = APIRouter(prefix="/api/rahaza/journals", tags=["rahaza-journals"],
                    dependencies=[Depends(require_portal_dep("finance"))])  # RBAC: portal finance (BUG-RBAC-1)
 
 JE_STATUS = ["draft", "posted", "voided"]
+# SESI #19 — kunci kebijakan penomoran Jurnal Umum (registry `data/doc_number_registry.py`).
+JE_DOCNUM_KEY = "rahaza_journal_entries.je_number"
 
 
 def _uid(): return str(uuid.uuid4())
@@ -39,10 +42,14 @@ async def _require_fin(request: Request):
     raise HTTPException(403, "Forbidden: butuh permission finance.")
 
 
-async def _gen_je_number(db, d: date) -> str:
-    # RC-5 mitigation: race-safe atomic numbering via counters SSOT (replaces count_documents+1).
-    prefix = f"JE-{d.strftime('%Y%m%d')}-"
-    return await gen_prefixed_number(db, "rahaza_journal_entries", "je_number", prefix, 4)
+async def _gen_je_number(db, d: date, requested: str = "") -> str:
+    """Nomor jurnal lewat SATU PINTU kebijakan penomoran (SESI #19).
+
+    `d` tidak lagi dipakai untuk menyusun awalan (format tanggalnya diambil dari
+    setelan owner, kalender WIB — lihat `utils.counters.render_format`), tetapi tetap
+    ada di tanda tangan supaya pemanggil lama tidak perlu diubah.
+    """
+    return await issue_number(db, JE_DOCNUM_KEY, requested=requested)
 
 
 async def _validate_lines(db, lines: list) -> tuple[float, float]:
@@ -120,7 +127,7 @@ async def create_journal(request: Request):
     if post_now:
         await _check_period_open(db, je_date)
 
-    je_number = await _gen_je_number(db, je_date)
+    je_number = await _gen_je_number(db, je_date, (body.get("je_number") or "").strip())
     je_id = _uid()
     doc = {
         "id": je_id,
@@ -156,12 +163,20 @@ async def create_journal(request: Request):
         for ln in lines
     ]
     # RC-5 safety-net: retry with a fresh number if a concurrent insert wins the unique index.
+    # SESI #19 — pada mode MANUAL nomornya DIKETIK orang: mengganti nomornya diam-diam
+    # dengan nomor lain adalah kebohongan (pemakai menyimpan JE-…-0007 lalu menemukan
+    # nomor lain di arsip). Karena itu nomor ketikan yang bentrok dijawab 409, dan
+    # retry otomatis hanya berlaku untuk mode OTOMATIS.
+    diketik = bool((body.get("je_number") or "").strip())
     for _attempt in range(6):
         try:
             await db.rahaza_journal_entries.insert_one(doc)
             break
         except DuplicateKeyError:
             doc.pop("_id", None)
+            if diketik:
+                raise HTTPException(
+                    409, f"Nomor jurnal '{doc['je_number']}' sudah dipakai dokumen lain.")
             doc["je_number"] = await _gen_je_number(db, je_date)
     else:
         raise HTTPException(409, "Nomor jurnal bentrok berulang — silakan coba lagi.")

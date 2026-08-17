@@ -17,7 +17,16 @@ export default function HubTabs({ hubId, title, subtitle, tabs, ...rest }) {
     try {
       const saved = sessionStorage.getItem(`hub_tab_${hubId}`);
       if (saved && tabs.some((t) => t.key === saved)) {
-        sessionStorage.removeItem(`hub_tab_${hubId}`);
+        // SESI #19 — petunjuk tab dihapus TERTUNDA (1,5 detik), bukan seketika.
+        // Terukur: membuka deep-link tab (mis. `#mgmt-pdf` → hub tab 'pdf') SEBELUM
+        // login membuat hub ter-mount dua kali (sekali saat alur login, sekali
+        // setelahnya). Mount pertama MENGHABISKAN petunjuknya, sehingga mount kedua
+        // jatuh ke tab pertama — pemakai mengklik "PDF & Kop Surat" lalu mendarat di
+        // "Perusahaan" tanpa tahu kenapa. Jeda singkat membuat mount ulang tetap
+        // terlayani, tanpa membuat petunjuk itu menempel selamanya.
+        setTimeout(() => {
+          try { sessionStorage.removeItem(`hub_tab_${hubId}`); } catch (e) { /* noop */ }
+        }, 1500);
         return saved;
       }
     } catch (e) { /* sessionStorage tidak tersedia */ }

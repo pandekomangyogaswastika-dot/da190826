@@ -65,15 +65,27 @@ def pattern_for(fmt: str) -> str:
         elif token in _TOKEN_PATTERNS:
             out.append(_TOKEN_PATTERNS[token])
         else:
-            out.append(r"[A-Za-z0-9._]+")
+            # SESI #19 — tanda hubung DIIZINKAN di token konteks. Terukur: format
+            # Surat Jalan Gudang adalah `{TIPE}/{YYYY}/{MM}/{SEQ:4}` dan setiap
+            # TIPE-nya memuat tanda hubung (SJ-CMT, SJ-MAKLON, SJ-INTERNAL, …).
+            # Dengan kelas karakter lama ([A-Za-z0-9._]+), nomor manual yang BENAR
+            # ("SJ-INTERNAL/2026/08/0007") selalu ditolak "tidak mengikuti pola" —
+            # mode MANUAL akan mustahil dipakai untuk surat jalan.
+            out.append(r"[A-Za-z0-9._-]+")
         pos = m.end()
     out.append(re.escape(fmt[pos:]))
     out.append("$")
     return "".join(out)
 
 
-async def policy(db, key: str) -> dict:
-    """Kebijakan nomor untuk satu jenis dokumen (mode + format + contoh + pola)."""
+async def policy(db, key: str, ctx: Optional[dict] = None) -> dict:
+    """Kebijakan nomor untuk satu jenis dokumen (mode + format + contoh + pola).
+
+    `ctx` (SESI #19) mengisi token konteks (mis. {TIPE} pada Surat Jalan) supaya
+    CONTOH yang ditampilkan layar memakai nilai yang benar-benar dipilih pemakai.
+    Tanpa ini contohnya berbunyi "TIP/2026/08/0001" — nomor yang tidak akan pernah
+    lahir, dan layar yang menyebut nomor palsu sama saja berbohong.
+    """
     entry = _entry(key)
     cfg = await db[CONFIG_COLL].find_one({"key": key}, {"_id": 0}) or {}
     fmt = cfg.get("format") or entry["default_format"]
@@ -83,6 +95,9 @@ async def policy(db, key: str) -> dict:
     seqd = entry.get("sequenced", True)
     try:
         contoh = validate_format(fmt, entry.get("tokens"), require_seq=seqd)
+        if ctx:
+            prefix, width = render_format(fmt, ctx=ctx, require_seq=seqd)
+            contoh = f"{prefix}{1:0{width}d}" if width else prefix
         error = None
     except ValueError as e:
         contoh, error = None, str(e)
@@ -99,7 +114,7 @@ async def policy(db, key: str) -> dict:
 async def next_preview(db, key: str, ctx: Optional[dict] = None) -> Optional[str]:
     """Nomor yang AKAN dipakai bila dibuat sekarang (tanpa menghabiskannya)."""
     entry = _entry(key)
-    pol = await policy(db, key)
+    pol = await policy(db, key, ctx)
     if pol["error"] or not pol["sequenced"]:
         return pol["contoh"]
     coll, field = target_of(entry)

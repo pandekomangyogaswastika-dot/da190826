@@ -3089,7 +3089,7 @@
   {
    "file": "frontend/src/components/erp/RahazaJournalEntryModule.jsx",
    "name": "RahazaJournalEntryModule.jsx",
-   "lines": 350,
+   "lines": 367,
    "cards": 7,
    "grids": 5,
    "tables": 2,
@@ -5091,7 +5091,7 @@
   {
    "file": "frontend/src/components/erp/PDFConfigModule.jsx",
    "name": "PDFConfigModule.jsx",
-   "lines": 452,
+   "lines": 465,
    "cards": 0,
    "grids": 1,
    "tables": 0,
@@ -5141,7 +5141,7 @@
   {
    "file": "frontend/src/components/erp/PdfDocSettingsModule.jsx",
    "name": "PdfDocSettingsModule.jsx",
-   "lines": 439,
+   "lines": 452,
    "cards": 0,
    "grids": 5,
    "tables": 0,
@@ -5193,7 +5193,7 @@
   {
    "file": "frontend/src/components/erp/ProcurementRequestModule.jsx",
    "name": "ProcurementRequestModule.jsx",
-   "lines": 1430,
+   "lines": 1450,
    "cards": 0,
    "grids": 5,
    "tables": 1,
@@ -5909,7 +5909,7 @@
   {
    "file": "frontend/src/components/erp/WMSDeliveryNotesModule.jsx",
    "name": "WMSDeliveryNotesModule.jsx",
-   "lines": 975,
+   "lines": 1003,
    "cards": 0,
    "grids": 9,
    "tables": 2,

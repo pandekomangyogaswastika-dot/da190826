@@ -25,7 +25,7 @@ import time
 from datetime import datetime, date, timedelta
 from typing import Dict, Optional, List
 
-BASE_URL = "https://maklon-dispatch-fix.preview.emergentagent.com"
+BASE_URL = "https://smart-preview-pdf.preview.emergentagent.com"
 
 # Test accounts (from test_credentials.md)
 ACCOUNTS = {
