@@ -1,0 +1,50 @@
+[
+  {
+    "content": "Setup: clone repo → /app, bootstrap (deps, build, seed), verify health + 6 logins",
+    "status": "completed"
+  },
+  {
+    "content": "Phase 1 (POC): backend core/cutting_material_issue.py + hook in cutting progress + MI source filter + backfill endpoints",
+    "status": "completed"
+  },
+  {
+    "content": "Phase 1 (POC): test_core_h6b_cutting_mi.py — 77/77 GREEN",
+    "status": "completed"
+  },
+  {
+    "content": "Phase 2: Frontend — MI list 'Sumber' column+filter+badge, detail panel (roll trace, no-journal reason), cutting order link",
+    "status": "completed"
+  },
+  {
+    "content": "Phase 2: Frontend — CuttingOrdersModule shows MI number per progress + 'Progres tanpa dokumen MI' backfill card",
+    "status": "completed"
+  },
+  {
+    "content": "Phase 2: rebuild frontend static bundle + verify screens via screenshot",
+    "status": "completed"
+  },
+  {
+    "content": "Phase 2: gate INV-F24 (14 invarian) + registered in gate.sh + bash -n check",
+    "status": "completed"
+  },
+  {
+    "content": "Phase 2: lint cleanup H-7/H-8 files — 13 → 0 ruff findings",
+    "status": "completed"
+  },
+  {
+    "content": "Phase 3: End-to-end testing via testing_agent_v3 — 10/10 user stories A–J verified",
+    "status": "completed"
+  },
+  {
+    "content": "Phase 3: fixed ALL findings — materials GET 405, INV-F13 guard precision, INV-18/INV-14 fresh-container reds, orphan cutting MI leak (C14)",
+    "status": "completed"
+  },
+  {
+    "content": "Phase 3: FULL gate suite 42/42 PASS · 0 FAIL · 0 SKIP · VERDICT HIJAU",
+    "status": "completed"
+  },
+  {
+    "content": "Phase 3: docs — plan.md SESI #17, CHANGELOG [#17], ROADMAP (Fase H 100%), HANDOFF #17, PRD, test_result.md",
+    "status": "completed"
+  }
+]
