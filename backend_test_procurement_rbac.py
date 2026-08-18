@@ -16,7 +16,7 @@ import sys
 import requests
 from datetime import datetime
 
-BASE_URL = "https://smart-preview-pdf.preview.emergentagent.com"
+BASE_URL = "https://erp-docs-5.preview.emergentagent.com"
 
 # Test credentials
 CREDENTIALS = {

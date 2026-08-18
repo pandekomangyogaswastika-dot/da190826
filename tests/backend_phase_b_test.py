@@ -8,7 +8,7 @@ import sys
 from datetime import datetime
 
 # Configuration
-BASE_URL = "https://smart-preview-pdf.preview.emergentagent.com/api"
+BASE_URL = "https://erp-docs-5.preview.emergentagent.com/api"
 ADMIN_EMAIL = "admin@garment.com"
 ADMIN_PASSWORD = "Admin@123"
 VENDOR_EMAIL = "cmtvendor@dewiaditya.id"

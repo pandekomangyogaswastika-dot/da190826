@@ -6,7 +6,7 @@ import requests
 from datetime import datetime
 
 # Use public endpoint
-BASE_URL = "https://smart-preview-pdf.preview.emergentagent.com"
+BASE_URL = "https://erp-docs-5.preview.emergentagent.com"
 
 # Test credentials
 ADMIN = {"email": "admin@garment.com", "password": "Admin@123"}

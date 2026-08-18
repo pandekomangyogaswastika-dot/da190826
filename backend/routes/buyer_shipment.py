@@ -803,6 +803,39 @@ async def create_buyer_shipment(request: Request):
     #
     # Pagar ini hanya butuh `items_data`, `source_receipt_ids`, dan `receiver_type`
     # — tidak satu pun butuh `shipment_id` — jadi memindahkannya ke atas aman.
+    # ═══════════════════════════════════════════════════════════════════════
+    # LANJUTAN DISPATCH pada surat jalan yang SAMA (keluhan pemilik 2026-06)
+    # ═══════════════════════════════════════════════════════════════════════
+    # CACAT NYATA: penyambungan dispatch hanya bisa lewat `job_id` (jalur
+    # deklarasi vendor). Untuk dispatch DA → buyer, setiap penyimpanan selalu
+    # membuat surat jalan BARU dengan nomor baru dan `dispatch_seq` kembali ke 1.
+    # Akibatnya pengiriman bertahap (partial) tidak pernah bisa mencapai 100%
+    # pada satu surat jalan: yang muncul adalah beberapa surat jalan terpisah
+    # untuk PO yang sama. Dibuktikan `scripts/_repro_5bug_produksi_maklon.py`
+    # (BUG 2). Sekarang layar boleh mengirim `shipment_id` (tombol "+ Dispatch")
+    # dan kiriman itu ditambahkan sebagai `dispatch_seq` berikutnya — nomor surat
+    # jalan TIDAK berubah. Pagar kapasitas tidak dilonggarkan sedikit pun: batas
+    # "sisa bisa kirim" dihitung per po_item melintasi SEMUA surat jalan.
+    #
+    # Diperiksa SEBELUM pagar qty/kapasitas di bawah supaya `shipment_id` yang
+    # salah menjawab "surat jalan tidak ditemukan" (404) — bukan pesan qty yang
+    # menyesatkan pemakai ke arah yang keliru.
+    cont_id = (body.get('shipment_id') or '').strip()
+    master_shipment = None
+    if cont_id:
+        master_shipment = await db.buyer_shipments.find_one({'id': cont_id})
+        if not master_shipment:
+            raise HTTPException(404, f'Surat jalan {cont_id} tidak ditemukan — '
+                                     'lanjutan dispatch dibatalkan')
+        _cur_rt = master_shipment.get('receiver_type') or RECEIVER_BUYER
+        if _cur_rt != receiver_type:
+            raise HTTPException(
+                400, f"Surat jalan {master_shipment.get('shipment_number')} bertipe "
+                     f"penerima '{_cur_rt}', tidak bisa dilanjutkan sebagai "
+                     f"'{receiver_type}'.")
+        if is_vendor(user) and master_shipment.get('vendor_id') != vendor_id:
+            raise HTTPException(403, 'Surat jalan ini bukan milik vendor Anda')
+
     # ─── VALIDATION GUARDRAILS (Phase A — C-1 & M-1) ──────────────────────
     # Reject 0-qty dispatches (M-1): require at least one item with qty_shipped > 0
     total_qty_in_request = sum(int(i.get('qty_shipped', 0) or 0) for i in items_data)
@@ -883,8 +916,7 @@ async def create_buyer_shipment(request: Request):
 
 
     job_id = body.get('job_id')
-    master_shipment = None
-    if job_id:
+    if master_shipment is None and job_id:
         master_shipment = await db.buyer_shipments.find_one({'job_id': job_id, 'vendor_id': vendor_id})
     is_new = not master_shipment
     if is_new:
@@ -929,6 +961,19 @@ async def create_buyer_shipment(request: Request):
         await db.buyer_shipments.insert_one(master_shipment)
     else:
         shipment_id = master_shipment['id']
+        # Lanjutan dispatch: sumber penerimaan & PO yang baru ikut dicatat di
+        # header supaya jejak "surat jalan ini berasal dari penerimaan apa" utuh.
+        if source_receipt_ids:
+            await db.buyer_shipments.update_one(
+                {'id': shipment_id},
+                {'$addToSet': {'source_receipt_ids': {'$each': list(source_receipt_ids)}}})
+        _new_pos = [p for p in po_ids
+                    if p and p not in (master_shipment.get('po_ids') or [])]
+        if _new_pos:
+            await db.buyer_shipments.update_one(
+                {'id': shipment_id},
+                {'$addToSet': {'po_ids': {'$each': _new_pos}},
+                 '$set': {'consolidated': len((master_shipment.get('po_ids') or [])) + len(_new_pos) > 1}})
     existing_items = await db.buyer_shipment_items.find({'shipment_id': shipment_id}).to_list(None)
     max_dispatch = max((i.get('dispatch_seq', 1) for i in existing_items), default=0)
     dispatch_seq = max_dispatch + 1

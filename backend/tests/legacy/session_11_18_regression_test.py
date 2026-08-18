@@ -21,7 +21,7 @@ import sys
 from datetime import datetime
 
 # Public endpoint from frontend/.env
-API = "https://smart-preview-pdf.preview.emergentagent.com"
+API = "https://erp-docs-5.preview.emergentagent.com"
 
 class Session11_18RegressionTester:
     def __init__(self):

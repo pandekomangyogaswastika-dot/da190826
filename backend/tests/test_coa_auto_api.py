@@ -8,7 +8,7 @@ import json
 from datetime import datetime
 
 class CoaAutoAPITester:
-    def __init__(self, base_url="https://smart-preview-pdf.preview.emergentagent.com"):
+    def __init__(self, base_url="https://erp-docs-5.preview.emergentagent.com"):
         self.base_url = base_url
         self.token = None
         self.tests_run = 0

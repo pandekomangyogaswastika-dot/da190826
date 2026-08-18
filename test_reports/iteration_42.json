@@ -199,7 +199,7 @@
   },
   
   "environment": {
-    "frontend_url": "https://smart-preview-pdf.preview.emergentagent.com",
+    "frontend_url": "https://erp-docs-5.preview.emergentagent.com",
     "test_credentials": "admin@garment.com / Admin@123 (rate-limited 10/60s)",
     "modules_tested": [
       "cmt-override-portal (Weekly Recap) - PARTIAL SUCCESS",

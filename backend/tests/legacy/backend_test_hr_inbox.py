@@ -8,7 +8,7 @@ from datetime import datetime, timedelta
 import os
 
 # Get backend URL from env
-BACKEND_URL = os.getenv('REACT_APP_BACKEND_URL', 'https://smart-preview-pdf.preview.emergentagent.com')
+BACKEND_URL = os.getenv('REACT_APP_BACKEND_URL', 'https://erp-docs-5.preview.emergentagent.com')
 API_BASE = f"{BACKEND_URL}/api"
 
 class HRInboxTester:

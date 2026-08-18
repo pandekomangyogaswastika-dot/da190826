@@ -1029,7 +1029,7 @@ frontend:
           7) **Zero-regression check:** hash `#marketing-orders` + reload masih render UnifiedOrdersDashboard (jangan sampai kena efek samping perubahan registry).
 
           Kredensial: `admin@garment.com` / `Admin@123`.
-          URL preview: `REACT_APP_BACKEND_URL` di `frontend/.env` (https://smart-preview-pdf.preview.emergentagent.com).
+          URL preview: `REACT_APP_BACKEND_URL` di `frontend/.env` (https://erp-docs-5.preview.emergentagent.com).
 
       - working: false
         agent: "testing"

@@ -21,6 +21,11 @@ export default function BuyerShipmentModule({ userRole, hasPerm = () => false, p
   const [poItems, setPoItems] = useState([]);
   const [selectedPO, setSelectedPO] = useState(null);
   const [showModal, setShowModal] = useState(false);
+  // ── LANJUTAN DISPATCH pada surat jalan yang SAMA (keluhan pemilik 2026-06) ──
+  // Berisi surat jalan yang sedang DILANJUTKAN (bukan dibuat baru). Kalau terisi,
+  // form mengirim `shipment_id` sehingga backend menambah `dispatch_seq`
+  // berikutnya pada surat jalan itu — nomornya tidak berubah.
+  const [continueShip, setContinueShip] = useState(null);
   const [showDetail, setShowDetail] = useState(false);
   const [detailData, setDetailData] = useState(null);
   const [confirmDelete, setConfirmDelete] = useState(null);
@@ -266,9 +271,48 @@ export default function BuyerShipmentModule({ userRole, hasPerm = () => false, p
 
   const openCreateModal = () => {
     setShowModal(true);
+    setContinueShip(null);
     setConsolidate(false); setConsBuyer(''); setConsReceipts([]); setReceiptLinesCache({});
     setForm({ shipment_number: '', po_id: '', shipment_date: new Date().toISOString().split('T')[0], notes: '', items: [], source_receipt_ids: [] });
     setAvailableReceipts([]); resetCapacity();
+  };
+
+  // Dulu satu-satunya cara mengirim sisa adalah membuat surat jalan BARU, jadi
+  // satu PO berakhir punya beberapa nomor surat jalan dan tidak satu pun mencapai
+  // 100%. Tombol "+ Dispatch" membuka form yang SAMA dengan surat jalan induknya
+  // terpasang: PO, sumber penerimaan, dan sisa bisa kirim dimuat ulang dari
+  // backend supaya angkanya tidak pernah ditebak layar.
+  const openContinueModal = async (row) => {
+    setShowModal(true);
+    setContinueShip(row);
+    setConsolidate(false); setConsBuyer(''); setConsReceipts([]); setReceiptLinesCache({});
+    setForm({ shipment_number: row.shipment_number || '', po_id: '',
+      shipment_date: new Date().toISOString().split('T')[0], notes: '', items: [], source_receipt_ids: [] });
+    setAvailableReceipts([]); resetCapacity();
+    try {
+      const det = await apiGet(`/buyer-shipments/${row.id}`);
+      const srcIds = (det?.source_receipt_ids || []).filter(Boolean);
+      const poIds = (det?.po_ids || []).filter(Boolean).length
+        ? det.po_ids.filter(Boolean) : (det?.po_id ? [det.po_id] : []);
+      if (poIds.length > 1) {
+        setConsolidate(true);
+        setConsBuyer(det.customer_name || '');
+        await enterConsolidation();
+        setForm(f => ({ ...f, source_receipt_ids: srcIds }));
+        const map = await fetchCapacity(srcIds);
+        setForm(f => ({ ...f, items: rowsFromCapacity(map) }));
+      } else {
+        await loadPOItems(poIds[0] || '');
+        setForm(f => ({ ...f, shipment_number: row.shipment_number || '', source_receipt_ids: srcIds }));
+        const map = await fetchCapacity(srcIds);
+        setForm(f => ({ ...f, items: annotateItemsWithCapacity(f.items, map) }));
+      }
+      if (srcIds.length === 0) {
+        toast.warning('Surat jalan ini belum punya sumber penerimaan CMT — pilih dulu penerimaan (Approved) sebelum menambah dispatch.');
+      }
+    } catch (e) {
+      toast.error(e.message || 'Gagal memuat surat jalan yang akan dilanjutkan');
+    }
   };
 
   const toggleConsolidateMode = (on) => {
@@ -346,11 +390,14 @@ export default function BuyerShipmentModule({ userRole, hasPerm = () => false, p
         source_receipt_ids: form.source_receipt_ids,
         receiver_type: 'buyer',
       };
-      if (form.shipment_number.trim()) payload.shipment_number = form.shipment_number.trim();
+      if (continueShip) payload.shipment_id = continueShip.id;
+      else if (form.shipment_number.trim()) payload.shipment_number = form.shipment_number.trim();
       try {
         const data = await apiPost('/buyer-shipments', payload);
-        toast.success(`Surat jalan konsolidasi ${data.shipment_number || ''} dibuat (${(data.po_ids || []).length} PO)`);
-        setShowModal(false); fetchAll();
+        toast.success(continueShip
+          ? `Dispatch #${data.dispatch_seq || ''} ditambahkan ke surat jalan ${data.shipment_number || ''}`
+          : `Surat jalan konsolidasi ${data.shipment_number || ''} dibuat (${(data.po_ids || []).length} PO)`);
+        setShowModal(false); setContinueShip(null); fetchAll();
       } catch (err) { toast.error(err.message || 'Gagal membuat surat jalan konsolidasi'); }
       return;
     }
@@ -389,10 +436,17 @@ export default function BuyerShipmentModule({ userRole, hasPerm = () => false, p
       source_receipt_ids: form.source_receipt_ids,
       receiver_type: 'buyer',
     };
+    if (continueShip) {
+      payload.shipment_id = continueShip.id;
+      delete payload.shipment_number;   // nomor surat jalan induk tidak boleh berubah
+    }
     try {
       const data = await apiPost('/buyer-shipments', payload);
-      toast.success(`Shipment ${data.shipment_number || ''} berhasil dibuat`);
+      toast.success(continueShip
+        ? `Dispatch #${data.dispatch_seq || ''} ditambahkan ke surat jalan ${data.shipment_number || ''}`
+        : `Shipment ${data.shipment_number || ''} berhasil dibuat`);
       setShowModal(false);
+      setContinueShip(null);
       fetchAll();
     } catch (err) { toast.error(err.message || 'Gagal membuat buyer shipment'); }
   };
@@ -582,6 +636,14 @@ export default function BuyerShipmentModule({ userRole, hasPerm = () => false, p
     }},
     { key: 'actions', label: 'Aksi', render: (_, row) => (
       <div className="flex items-center gap-1">
+        {canEdit && (row.progress_pct || 0) < 100 && (
+          <button onClick={(e) => { e.stopPropagation(); openContinueModal(row); }}
+            className="px-2 py-1 rounded bg-blue-600 text-white text-[11px] font-semibold hover:bg-blue-700 whitespace-nowrap flex items-center gap-1"
+            data-testid={`continue-dispatch-${row.shipment_number}`}
+            title="Kirim sisa pada surat jalan INI (dispatch lanjutan, nomor tidak berubah)">
+            <Plus className="w-3 h-3" /> Dispatch
+          </button>
+        )}
         <button onClick={() => openDetail(row)} className="p-1.5 rounded hover:bg-blue-50 text-blue-600" title="Detail">
           <Eye className="w-4 h-4" />
         </button>
@@ -1065,12 +1127,22 @@ export default function BuyerShipmentModule({ userRole, hasPerm = () => false, p
 
       {/* Create Modal */}
       {showModal && (
-        <Modal title="Buat Buyer Shipment" onClose={() => setShowModal(false)} size="2xl">
+        <Modal title={continueShip ? `Lanjutkan Dispatch — ${continueShip.shipment_number}` : 'Buat Buyer Shipment'}
+          onClose={() => { setShowModal(false); setContinueShip(null); }} size="2xl">
           <form onSubmit={handleSubmit} className="space-y-4">
+            {continueShip && (
+              <div className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-900" data-testid="continue-dispatch-banner">
+                Kiriman ini ditambahkan sebagai <strong>dispatch berikutnya</strong> pada surat jalan{' '}
+                <span className="font-mono font-semibold">{continueShip.shipment_number}</span> — nomornya TIDAK berubah,
+                dan progres pengiriman PO naik pada surat jalan yang sama. Qty maksimal tetap
+                &quot;sisa bisa kirim&quot; (lolos QC + hasil permak − yang sudah dikirim).
+              </div>
+            )}
             <div className="grid grid-cols-2 gap-4">
               <div>
-                <label className="block text-sm font-medium text-foreground/90 mb-1">No. Surat Jalan <span className="text-muted-foreground font-normal">(kosongkan = auto)</span></label>
-                <input type="text" placeholder="otomatis sesuai format" className="w-full border border-border rounded-lg px-3 py-2 text-sm"
+                <label className="block text-sm font-medium text-foreground/90 mb-1">No. Surat Jalan <span className="text-muted-foreground font-normal">{continueShip ? '(tetap, tidak berubah)' : '(kosongkan = auto)'}</span></label>
+                <input type="text" placeholder="otomatis sesuai format" disabled={!!continueShip}
+                  className="w-full border border-border rounded-lg px-3 py-2 text-sm disabled:opacity-60 disabled:cursor-not-allowed"
                   value={form.shipment_number} onChange={e => setForm(f => ({...f, shipment_number: e.target.value}))} data-testid="sj-number-input" />
               </div>
               <div>
@@ -1081,8 +1153,9 @@ export default function BuyerShipmentModule({ userRole, hasPerm = () => false, p
             </div>
 
             {/* Phase D: consolidation toggle */}
-            <label className="flex items-center gap-3 rounded-lg border border-violet-200 bg-violet-50 px-3 py-2 cursor-pointer" data-testid="consolidate-toggle">
-              <input type="checkbox" checked={consolidate} onChange={e => toggleConsolidateMode(e.target.checked)} className="w-4 h-4" />
+            <label className={`flex items-center gap-3 rounded-lg border border-violet-200 bg-violet-50 px-3 py-2 ${continueShip ? 'opacity-60' : 'cursor-pointer'}`} data-testid="consolidate-toggle">
+              <input type="checkbox" checked={consolidate} disabled={!!continueShip}
+                onChange={e => toggleConsolidateMode(e.target.checked)} className="w-4 h-4" />
               <span className="text-sm">
                 <span className="font-semibold text-violet-900">Gabungkan beberapa PO (konsolidasi)</span>
                 <span className="block text-xs text-violet-700">1 surat jalan untuk banyak PO milik buyer yang sama — progress tetap dihitung per PO.</span>
@@ -1093,7 +1166,8 @@ export default function BuyerShipmentModule({ userRole, hasPerm = () => false, p
             {!consolidate && (
             <div>
               <label className="block text-sm font-medium text-foreground/90 mb-1">Pilih PO *</label>
-              <SmartNativeSelect className="w-full border border-border rounded-lg px-3 py-2 text-sm"
+              <SmartNativeSelect className="w-full border border-border rounded-lg px-3 py-2 text-sm disabled:opacity-60"
+                disabled={!!continueShip}
                 value={form.po_id} onChange={e => loadPOItems(e.target.value)}>
                 <option value="">-- Pilih PO --</option>
                 {pos.map(p => (
@@ -1304,7 +1378,10 @@ export default function BuyerShipmentModule({ userRole, hasPerm = () => false, p
               <textarea className="w-full border border-border rounded-lg px-3 py-2 text-sm" rows="2"
                 value={form.notes} onChange={e => setForm(f => ({...f, notes: e.target.value}))} />
             </div>
-            <button type="submit" className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700">Simpan</button>
+            <button type="submit" className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700"
+              data-testid="sj-submit-btn">
+              {continueShip ? 'Tambah Dispatch' : 'Simpan'}
+            </button>
           </form>
         </Modal>
       )}

@@ -28,7 +28,7 @@ import io
 # ══════════════════════════════════════════════════════════════════════════════
 # CONFIGURATION
 # ══════════════════════════════════════════════════════════════════════════════
-BASE_URL = "https://smart-preview-pdf.preview.emergentagent.com/api"
+BASE_URL = "https://erp-docs-5.preview.emergentagent.com/api"
 LOGIN_EMAIL = "admin@garment.com"
 LOGIN_PASSWORD = "Admin@123"
 

@@ -3,7 +3,7 @@
 import requests
 import sys
 
-BASE_URL = "https://smart-preview-pdf.preview.emergentagent.com"
+BASE_URL = "https://erp-docs-5.preview.emergentagent.com"
 ADMIN_CREDS = {"email": "admin@garment.com", "password": "Admin@123"}
 
 # Expected data for July 2026 at TIKTOK-OUTFIT store

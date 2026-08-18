@@ -50,6 +50,37 @@ const MODE_LABELS = {
   },
 };
 
+// ── PERMINTAAN PENGGANTI (REPLACEMENT) — 2026-06 ────────────────────────────
+// Jenis permintaan ini SUDAH didukung backend (`POST /api/material-requests`
+// request_type='REPLACEMENT' → approval membuat surat jalan anak "-R1"), tetapi
+// tidak punya satu pun pintu di layar: tombol buat hanya dirender untuk tab
+// TAMBAHAN, dan jalur lamanya (Laporan Cacat Material) sudah dimatikan backend
+// dengan HTTP 410. Label dipisah supaya vendor tahu ini untuk barang CACAT/RUSAK
+// (bukan kurang kirim) — dua hal yang penanganannya berbeda.
+const REPLACEMENT_LABELS = {
+  inspection: {
+    title: 'Ajukan Permintaan Material Pengganti',
+    subtitle: 'Material cacat/rusak diajukan ke ERP untuk DIGANTI dengan kiriman baru.',
+    submitLabel: 'Ajukan ke ERP',
+    badge: 'PENGGANTI',
+    badgeColor: 'bg-red-100 text-red-800',
+  },
+  resubmit: {
+    title: 'Ajukan Ulang Permintaan Pengganti',
+    subtitle: 'Permintaan sebelumnya ditolak. Anda dapat merevisi qty/alasan dan mengajukan ulang.',
+    submitLabel: 'Kirim Permintaan Baru',
+    badge: 'PENGGANTI · AJUKAN ULANG',
+    badgeColor: 'bg-red-100 text-red-800',
+  },
+  manual: {
+    title: 'Buat Permintaan Material Pengganti',
+    subtitle: 'Untuk material yang CACAT/RUSAK (bukan kurang kirim). Sebutkan cacatnya pada alasan per-item.',
+    submitLabel: 'Kirim Permintaan',
+    badge: 'PENGGANTI',
+    badgeColor: 'bg-red-100 text-red-800',
+  },
+};
+
 export default function AdditionalRequestModal({
   shipment,
   defaultItems = [],
@@ -58,12 +89,17 @@ export default function AdditionalRequestModal({
   previousRequestNumber = '',
   inspectionId = '',
   mode = 'inspection',
+  requestType = 'ADDITIONAL',
   onClose,
   onSuccess,
 }) {
-  const cfg = MODE_LABELS[mode] || MODE_LABELS.manual;
+  const isReplacement = requestType === 'REPLACEMENT';
+  const cfg = (isReplacement ? REPLACEMENT_LABELS : MODE_LABELS)[mode]
+    || (isReplacement ? REPLACEMENT_LABELS.manual : MODE_LABELS.manual);
   const [overallReason, setOverallReason] = useState(
-    defaultReason || `Material missing/kurang dari shipment ${shipment?.shipment_number || ''}`
+    defaultReason || (isReplacement
+      ? `Material cacat/rusak pada shipment ${shipment?.shipment_number || ''} — mohon diganti`
+      : `Material missing/kurang dari shipment ${shipment?.shipment_number || ''}`)
   );
   const [items, setItems] = useState(
     (defaultItems || []).map((it) => ({
@@ -141,7 +177,7 @@ export default function AdditionalRequestModal({
           reason: it.reason.trim(),
         }));
       const body = {
-        request_type: 'ADDITIONAL',
+        request_type: requestType,
         original_shipment_id: shipment.id,
         po_id: shipment.po_id || '',
         po_number: shipment.po_number || '',

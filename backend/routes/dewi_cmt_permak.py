@@ -431,6 +431,55 @@ async def permak_summary(request: Request, po_id: Optional[str] = None):
     return summary
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# 2026-06 — PERMAK "REJECT QC" WAJIB TERTAUT BARIS PENERIMAAN (cacat wiring)
+# ─────────────────────────────────────────────────────────────────────────────
+# Layar "Buat Permak Baru" hanya menanyakan PO + item + qty, jadi dokumennya
+# tersimpan TANPA `source_receipt_line_id`. Akibatnya begitu permak dinyatakan
+# BERHASIL, `core.production_qty_ledger.apply_rework_outcome()`:
+#   · TIDAK menaikkan `cmt_receipt_lines.qty_reworked_ok` ⇒ kapasitas kirim ke
+#     buyer tidak pernah bertambah (barang yang sudah bagus mustahil dikirim);
+#   · TIDAK menemukan item KARANTINA-nya ⇒ stok FG tidak bertambah
+#     (`stock_released: 0`), jadi pagar stok menolak pengiriman berikutnya.
+# Dibuktikan `scripts/_repro_5bug_produksi_maklon.py` (BUG 1), dijaga INV-F27.
+#
+# Penautan sekarang dikerjakan BACKEND: qty permak dipetakan ke baris penerimaan
+# yang masih punya sisa reject, FIFO, boleh melintasi beberapa baris. SATU baris
+# penerimaan = SATU dokumen permak (dokumen kembar), supaya SEMUA pembaca lama
+# (`_permaked_qty_for_line`, antrean reject, karantina, packing) tetap benar
+# tanpa perlu mengerti soal alokasi.
+async def _reject_allocations(db, po_item_id: str, qty: int) -> tuple:
+    """(alokasi, total sisa reject yang belum dipermak) untuk satu po_item.
+
+    Hanya baris dari penerimaan yang SUDAH selesai QC yang dihitung — gerbang
+    yang sama dengan `/from-receipt-line`.
+    """
+    from core.cmt_receipt_status import is_done as _receipt_done
+    lines = await db.cmt_receipt_lines.find(
+        {"po_item_id": po_item_id, "reject_qty": {"$gt": 0}}, {"_id": 0}
+    ).sort("created_at", 1).to_list(None)
+    rec_ids = list({ln.get("receipt_id") for ln in lines if ln.get("receipt_id")})
+    receipts = await db.cmt_receipts.find(
+        {"id": {"$in": rec_ids}}, {"_id": 0, "id": 1, "status": 1}
+    ).to_list(None) if rec_ids else []
+    done = {r["id"] for r in receipts if _receipt_done(r.get("status"))}
+    allocations, left, sisa = [], _iv(qty), 0
+    for ln in lines:
+        if ln.get("receipt_id") not in done:
+            continue
+        remaining = _iv(ln.get("reject_qty")) - await _permaked_qty_for_line(db, ln["id"])
+        if remaining <= 0:
+            continue
+        sisa += remaining
+        if left <= 0:
+            continue
+        take = min(left, remaining)
+        allocations.append({"receipt_id": ln.get("receipt_id"),
+                            "receipt_line_id": ln["id"], "qty": take})
+        left -= take
+    return allocations, sisa
+
+
 @router.post("")
 async def create_permak(data: PermakCreate, request: Request):
     user = await require_auth(request)
@@ -442,7 +491,8 @@ async def create_permak(data: PermakCreate, request: Request):
         raise HTTPException(422, f"permak_type harus salah satu {PERMAK_TYPES}")
     meta = await _enrich_from_po_item(db, data.po_id, data.po_item_id)
 
-    # Guard qty terhadap sisa reject bila di-link ke sebuah receipt line
+    # ── Tautkan ke baris penerimaan (sumber reject) ──────────────────────────
+    allocations = []
     if data.source_receipt_line_id:
         line = await db.cmt_receipt_lines.find_one(
             {"id": data.source_receipt_line_id}, {"_id": 0}
@@ -455,64 +505,100 @@ async def create_permak(data: PermakCreate, request: Request):
                     400,
                     f"Qty permak melebihi sisa reject. reject={reject_qty}, sudah dipermak={already}, diminta={data.qty}",
                 )
+        allocations = [{"receipt_id": data.source_receipt_id or (line or {}).get("receipt_id"),
+                        "receipt_line_id": data.source_receipt_line_id, "qty": data.qty}]
+    elif data.source == "reject":
+        allocations, sisa = await _reject_allocations(db, data.po_item_id, data.qty)
+        if sum(a["qty"] for a in allocations) < data.qty:
+            raise HTTPException(
+                400,
+                f"Qty permak {data.qty} pcs melebihi sisa reject yang belum dipermak "
+                f"({sisa} pcs) untuk item ini. Turunkan qty, atau catat reject-nya "
+                f"dulu di 'Terima FG dari CMT' dan selesaikan QC-nya — tanpa baris "
+                f"penerimaan, hasil permak tidak bisa menambah stok FG maupun sisa "
+                f"kirim ke buyer.")
+    if not allocations:
+        # sumber 'good' (barang bagus dipermak): tidak ada baris reject yang ditaut
+        allocations = [{"receipt_id": data.source_receipt_id,
+                        "receipt_line_id": data.source_receipt_line_id,
+                        "qty": data.qty}]
 
-    now = _now()
-    vendor = await _resolve_vendor_for_permak(db, data.po_id, data.source_receipt_id)
-    doc = {
-        "id": _id(),
-        "permak_number": await _next_permak_no(db),
-        "po_id": data.po_id,
-        "po_number": meta["po_number"],
-        "po_item_id": data.po_item_id,
-        "sku": meta["sku"],
-        "product_name": meta["product_name"],
-        "size": meta["size"],
-        "color": meta["color"],
-        "serial_number": meta["serial_number"],
-        # FASE 2: tautan vendor CMT — tanpa ini rework tidak bisa dilihat/dikerjakan vendor
-        "vendor_id": vendor["vendor_id"],
-        "vendor_name": vendor["vendor_name"],
-        "source": data.source,
-        "permak_type": data.permak_type,
-        "problem_type": data.problem_type,
-        "cost_per_pcs": float(data.cost_per_pcs or 0),
-        "total_cost": round(float(data.cost_per_pcs or 0) * data.qty, 2),
-        "return_deadline": data.return_deadline,
-        "source_receipt_id": data.source_receipt_id,
-        "source_receipt_line_id": data.source_receipt_line_id,
-        "qty": data.qty,
-        "qty_fixed": 0,
-        "qty_scrap": 0,
-        "vendor_permak": data.vendor_permak,
-        "reason": data.reason,
-        "notes": data.notes,
-        "photos": data.photos or [],
-        "status": "open",
-        "status_history": [{
-            "status": "open", "at": now.isoformat(),
-            "by": user.get("name", user["id"]), "note": "Permak dibuat",
-        }],
-        "created_at": now,
-        "created_by": user.get("name", user["id"]),
-        "updated_at": now,
-        "updated_by": user.get("name", user["id"]),
-    }
-    await db.dewi_cmt_permak.insert_one(doc)
+    docs, reworks = [], []
+    for alloc in allocations:
+        now = _now()
+        vendor = await _resolve_vendor_for_permak(db, data.po_id, alloc.get("receipt_id"))
+        qty_alloc = _iv(alloc.get("qty"))
+        doc = {
+            "id": _id(),
+            "permak_number": await _next_permak_no(db),
+            "po_id": data.po_id,
+            "po_number": meta["po_number"],
+            "po_item_id": data.po_item_id,
+            "sku": meta["sku"],
+            "product_name": meta["product_name"],
+            "size": meta["size"],
+            "color": meta["color"],
+            "serial_number": meta["serial_number"],
+            # FASE 2: tautan vendor CMT — tanpa ini rework tidak bisa dilihat/dikerjakan vendor
+            "vendor_id": vendor["vendor_id"],
+            "vendor_name": vendor["vendor_name"],
+            "source": data.source,
+            "permak_type": data.permak_type,
+            "problem_type": data.problem_type,
+            "cost_per_pcs": float(data.cost_per_pcs or 0),
+            "total_cost": round(float(data.cost_per_pcs or 0) * qty_alloc, 2),
+            "return_deadline": data.return_deadline,
+            "source_receipt_id": alloc.get("receipt_id"),
+            "source_receipt_line_id": alloc.get("receipt_line_id"),
+            # jejak: penautan otomatis oleh server (bukan pilihan layar)
+            "source_link_auto": bool(alloc.get("receipt_line_id")) and not data.source_receipt_line_id,
+            "qty": qty_alloc,
+            "qty_fixed": 0,
+            "qty_scrap": 0,
+            "vendor_permak": data.vendor_permak,
+            "reason": data.reason,
+            "notes": data.notes,
+            "photos": data.photos or [],
+            "status": "open",
+            "status_history": [{
+                "status": "open", "at": now.isoformat(),
+                "by": user.get("name", user["id"]), "note": "Permak dibuat",
+            }],
+            "created_at": now,
+            "created_by": user.get("name", user["id"]),
+            "updated_at": now,
+            "updated_by": user.get("name", user["id"]),
+        }
+        await db.dewi_cmt_permak.insert_one(doc)
 
-    # ── FASE 2: retur ke CMT → langsung buat SJ REWORK supaya vendor bisa mengerjakan ──
-    rework = None
-    if data.permak_type == "retur_ke_cmt":
-        rework = await _create_rework_shipment(db, doc, user)
-        if rework.get("ok"):
-            doc["rework_shipment_id"] = rework["shipment_id"]
-            doc["rework_shipment_number"] = rework["shipment_number"]
-            doc["status"] = "in_progress"
+        # ── FASE 2: retur ke CMT → langsung buat SJ REWORK supaya vendor bisa mengerjakan ──
+        if data.permak_type == "retur_ke_cmt":
+            rework = await _create_rework_shipment(db, doc, user)
+            reworks.append(rework)
+            if rework.get("ok"):
+                doc["rework_shipment_id"] = rework["shipment_id"]
+                doc["rework_shipment_number"] = rework["shipment_number"]
+                doc["status"] = "in_progress"
+        docs.append(doc)
 
+    primary = docs[0]
     await log_activity(user["id"], user.get("name", ""), "create", "cmt-permak",
-                       f"Permak {doc['permak_number']} qty {data.qty} ({meta['sku']})")
-    out = serialize_doc({k: v for k, v in doc.items() if k != "_id"})
-    if rework is not None:
-        out["rework"] = rework
+                       f"Permak {primary['permak_number']} qty {data.qty} ({meta['sku']})"
+                       + (f" — dipecah {len(docs)} dokumen sesuai baris penerimaan"
+                          if len(docs) > 1 else ""))
+    out = serialize_doc({k: v for k, v in primary.items() if k != "_id"})
+    out["allocations"] = allocations
+    if len(docs) > 1:
+        out["siblings"] = serialize_doc([{k: v for k, v in d.items() if k != "_id"}
+                                         for d in docs[1:]])
+        out["split_note"] = (
+            f"Qty {data.qty} pcs berasal dari {len(docs)} baris penerimaan, jadi "
+            f"dibuat {len(docs)} dokumen permak agar stok & sisa kirim tetap "
+            f"terlacak per penerimaan.")
+    if reworks:
+        out["rework"] = reworks[0]
+        if len(reworks) > 1:
+            out["reworks"] = reworks
     return out
 
 

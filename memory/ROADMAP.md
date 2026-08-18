@@ -1,5 +1,18 @@
 # ROADMAP — CV. Dewi Aditya ERP
 
+## Produksi & Maklon — **5 CACAT LOGIKA DITUTUP 2026-06-18 (sesi #20)**
+- ✅ Permak dari form manual OTOMATIS tertaut baris reject ⇒ permak berhasil menambah stok FG &
+  sisa bisa kirim ke buyer (dulu hasil permak mustahil dikirim).
+- ✅ Tombol **"+ Dispatch"**: pengiriman bertahap dilanjutkan pada surat jalan yang SAMA
+  (`dispatch_seq` +1, nomor tetap) — bukan surat jalan baru tiap kali.
+- ✅ Panel read-only **"Aksesoris dari BOM Katalog"** di form buat PO maklon, angkanya dari mesin
+  yang sama dengan yang tersimpan di `po_accessories`.
+- ✅ Vendor CMT punya tombol **"Buat Permintaan Pengganti"** (jalur lama sudah dimatikan HTTP 410).
+- ✅ Surat jalan ANAK (pengganti) tidak membawa daftar aksesoris PO.
+- Gate: **INV-F27** (`scripts/verify_permak_dispatch_aksesoris.py`, 9 invarian, termasuk pemeriksaan
+  pintu di layar). Sisa yang belum diuji lewat alur nyata: surat jalan anak diuji dengan dokumen anak
+  bentukan gate, **belum** lewat approval permintaan PENGGANTI ujung-ke-ujung (P2).
+
 ## Portal Gudang — **FASE H SELESAI 100%** (H-1 · H-2 · H-3 · H-4/H-9 · H-5 · H-6 · H-7 · H-8 ·
 ## H-6b — ditutup 2026-08-16 s/d 2026-08-17, sesi #14–#17)
 - ✅ **H-6b (SELESAI 2026-08-17 #17 — penutup Fase H)** Laporan progres Cutting **MENERBITKAN

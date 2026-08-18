@@ -1051,3 +1051,24 @@ Aturan tetap yang lahir dari sesi ini (jangan dilanggar tanpa keputusan owner ba
 - **Modul yang muncul di lebih dari satu portal** wajib diselesaikan `App.js:findPortalForModule()`
   dengan penyaringan `canAccessPortal` (ada 14 modul seperti ini). Memilih portal pertama menurut
   urutan deklarasi membuang pemakai ke portal yang tidak ia punyai tanpa pesan. Dijaga gate INV-F19.
+
+## Produksi/Maklon — aturan yang DIPUTUSKAN PEMILIK (2026-06-18, sesi #20)
+- **Permak (rework) selalu punya induk.** Permak reject tidak boleh berdiri sendiri: dokumen yang
+  dibuat dari form manual ditautkan server ke baris penerimaan CMT yang masih punya sisa reject
+  (FIFO). Alasannya bisnis: pagar "sisa bisa kirim" dan pelepasan stok FG dari karantina keduanya
+  membaca baris penerimaan — permak tanpa tautan = barang sudah bagus tetapi MUSTAHIL dikirim.
+  Qty permak tidak boleh melebihi sisa reject baris itu.
+- **Satu PO = satu surat jalan buyer yang progresnya naik.** Pengiriman bertahap DILANJUTKAN pada
+  surat jalan yang sama (`shipment_id` ⇒ `dispatch_seq` +1, nomor tidak berubah). Membuat surat jalan
+  baru untuk sisa kiriman dianggap cacat karena tidak ada satu pun dokumen yang mencapai 100%.
+  Pagar kapasitas tidak pernah dilonggarkan oleh lanjutan: batas tetap "lolos QC + hasil permak −
+  yang sudah dikirim", dihitung per `po_item` melintasi SEMUA surat jalan.
+- **Aksesoris BOM tidak diketik ulang.** Form buat PO maklon menampilkan kebutuhan aksesoris dari BOM
+  Template katalog buyer sebagai daftar READ-ONLY (pratinjau) — pemakai hanya mengetik aksesoris
+  DI LUAR BOM. Pratinjau dan penulisan `po_accessories` wajib memakai satu mesin.
+- **Vendor CMT boleh mengajukan material PENGGANTI sendiri** (bahan cacat/kurang saat inspeksi),
+  bukan hanya TAMBAHAN; jenis permintaan ditentukan tab yang aktif, tidak dihardcode.
+- **Kiriman anak hanya membawa isinya sendiri.** Surat jalan pengganti/tambahan/permak TIDAK membawa
+  daftar aksesoris PO, supaya form inspeksi vendor tidak memunculkan aksesoris yang tak pernah
+  dikirim dan tidak melahirkan permintaan aksesoris palsu.
+- Dijaga gate **INV-F27** (`scripts/verify_permak_dispatch_aksesoris.py`).

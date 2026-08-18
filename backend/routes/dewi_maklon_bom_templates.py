@@ -446,51 +446,8 @@ async def explode_maklon_bom_for_po(db, po_id: str, user: Optional[dict] = None,
             raise HTTPException(404, 'BOM Template tidak ditemukan')
 
     warnings: List[str] = []
-    templates_used: dict = {}
-    agg: dict = {}                    # (nama.lower(), unit.lower()) → baris
-    total_pcs = 0
-    tpl_cache: dict = {}
-
-    for it in items:
-        qty = int(it.get('qty') or 0)
-        total_pcs += qty
-        if qty <= 0:
-            continue
-        tpl = forced_template
-        if tpl is None:
-            cat_id = it.get('catalog_id')
-            if not cat_id:
-                warnings.append(f"Item '{it.get('label')}' belum tertaut artikel Katalog Buyer — BOM dilewati.")
-                continue
-            if cat_id not in tpl_cache:
-                tpl_cache[cat_id] = await _active_template_for_catalog(db, cat_id)
-            tpl = tpl_cache[cat_id]
-            if not tpl:
-                cat = await db.dewi_maklon_buyer_catalog.find_one({'id': cat_id}, {'_id': 0, 'artikel_code': 1, 'product_name': 1})
-                nama = (cat or {}).get('artikel_code') or (cat or {}).get('product_name') or cat_id
-                warnings.append(f"Artikel '{nama}' belum punya BOM Template AKTIF — buat/aktifkan dulu di Katalog Buyer.")
-                continue
-        templates_used[tpl['id']] = {'template_id': tpl['id'], 'version': tpl.get('version'),
-                                     'label': tpl.get('version_label', ''),
-                                     'catalog_id': tpl.get('buyer_catalog_id')}
-        for m in (tpl.get('materials') or []):
-            name = (m.get('material_name') or '').strip()
-            per = float(m.get('qty_per_pcs') or 0)
-            if not name or per <= 0:
-                continue
-            unit = (m.get('unit') or 'pcs').strip() or 'pcs'
-            line_type, mcat = _classify_line(m)
-            key = (name.lower(), unit.lower())
-            row = agg.setdefault(key, {
-                'material_name': name, 'unit': unit, 'material_category': mcat,
-                'line_type': line_type, 'qty_estimated': 0.0,
-                'cost_per_unit': float(m.get('cost_per_unit') or 0),
-                'supplier': m.get('supplier', ''), 'notes': m.get('notes', ''),
-                'source_template_id': tpl['id'], 'source_template_version': tpl.get('version'),
-                'source_template_label': tpl.get('version_label', ''),
-            })
-            row['qty_estimated'] += per * qty
-            row['cost_per_unit'] = row['cost_per_unit'] or float(m.get('cost_per_unit') or 0)
+    agg, total_pcs, warnings, templates_used = await aggregate_template_lines(
+        db, items, forced_template=forced_template)
 
     # nilai aktual & baris manual dari dokumen sebelumnya dipertahankan
     prev_by_key, prev_manual = {}, []
@@ -551,41 +508,15 @@ async def explode_maklon_bom_for_po(db, po_id: str, user: Optional[dict] = None,
         await db.dewi_maklon_bom.insert_one({**doc_set, 'id': _uid(), 'notes': '', 'created_at': now_})
 
     # ── Turunkan baris pcs ke kebutuhan aksesoris PO (tercetak di Surat Jalan) ──
-    by_name, by_code = await _material_lookup(db)
+    rows, unlinked, uom_issues = await accessory_rows_from_materials(db, materials)
     await db.po_accessories.delete_many({'po_id': po_id, 'source': ACC_SOURCE_TAG})
-    acc_rows, unlinked, uom_issues = 0, [], []
-    for m in materials:
-        if m.get('line_type') != 'accessory' or float(m.get('qty_estimated') or 0) <= 0:
-            continue
-        nm = (m['material_name'] or '').strip()
-        mat = by_name.get(nm.lower()) or by_code.get(nm.upper())
-        if not mat:
-            unlinked.append(nm)
-        # 2026-08-02 · SATUAN: qty_needed HARUS satuan dasar material (dibandingkan
-        # dengan stok & harga per satuan dasar). Template BOM maklon menulis satuan
-        # bebas (mis. 'lusin'), jadi dikonversi dulu lewat core.bom_uom.
-        factor, base_unit, uom_status, uom_note = bom_uom.line_factor(mat, m.get('unit'))
-        qty_base = round(float(m['qty_estimated']) * factor, 3)
-        if uom_status == 'mismatch':
-            uom_issues.append(f"{nm}: {uom_note}")
+    for row in rows:
         await db.po_accessories.insert_one({
-            'id': _uid(), 'po_id': po_id,
-            'accessory_id': (mat or {}).get('id'),
-            'accessory_name': nm,
-            'accessory_code': (mat or {}).get('code', ''),
-            'qty_needed': qty_base,
-            'unit': base_unit if mat else (m.get('unit') or 'pcs'),
-            'qty_input': round(float(m['qty_estimated']), 3),
-            'unit_input': m.get('unit', 'pcs'),
-            'uom_factor': round(factor, 8),
-            'uom_status': uom_status,
-            'notes': f"Auto dari BOM Template maklon v{m.get('source_template_version', '-')}"
-                     + (f" · {m.get('unit')}→{base_unit}" if factor != 1 else ''),
-            'source': ACC_SOURCE_TAG,
-            'unlinked': mat is None,
-            'created_at': now_,
+            **row, 'id': _uid(), 'po_id': po_id,
+            'source': ACC_SOURCE_TAG, 'created_at': now_,
         })
-        acc_rows += 1
+    acc_rows = len(rows)
+    by_name, by_code = await _material_lookup(db)
     # simpan hasil konversi pada baris BOM per-PO juga (dipakai SJ & checklist)
     for m in materials:
         nm = (m.get('material_name') or '').strip()
@@ -743,3 +674,165 @@ async def get_po_material_expectation(po_id: str, user: dict = Depends(require_a
     """Checklist material dari klien: ditunggu vs sudah datang (dari BOM per-PO)."""
     db = get_db()
     return await maklon_material_expectation(db, po_id)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# SATU MESIN — dipakai explode (saat PO disimpan) DAN pratinjau (saat form diisi)
+# ══════════════════════════════════════════════════════════════════════════════
+# Keluhan pemilik 2026-06: "katalog maklon sudah ada BOM aksesorisnya, di surat
+# jalan & SPP sudah muncul, tapi di FORM BUAT PO tidak auto load" — pemakai jadi
+# menyangka BOM-nya belum kena dan mengetik ulang baris aksesoris (kerja dobel +
+# baris kembar). Sebabnya: BOM baru diledakkan SESUDAH PO tersimpan, dan tidak
+# ada satu pun sumber angka yang bisa dibaca form.
+#
+# Dua fungsi di bawah adalah PECAHAN dari `explode_maklon_bom_for_po` (bukan
+# rumus kedua): explode memakainya untuk MENULIS, pratinjau memakainya untuk
+# MEMBACA. Kalau rumusnya berubah, dua-duanya ikut berubah — layar tidak bisa
+# lagi menjanjikan angka yang berbeda dari yang akhirnya tersimpan.
+async def aggregate_template_lines(db, items: List[dict],
+                                   forced_template: Optional[dict] = None) -> tuple:
+    """items = [{'catalog_id', 'qty', 'label'}] → (agg, total_pcs, warnings, templates_used)."""
+    warnings: List[str] = []
+    templates_used: dict = {}
+    agg: dict = {}                    # (nama.lower(), unit.lower()) → baris
+    total_pcs = 0
+    tpl_cache: dict = {}
+
+    for it in items:
+        qty = int(it.get('qty') or 0)
+        total_pcs += qty
+        if qty <= 0:
+            continue
+        tpl = forced_template
+        if tpl is None:
+            cat_id = it.get('catalog_id')
+            if not cat_id:
+                warnings.append(f"Item '{it.get('label')}' belum tertaut artikel Katalog Buyer — BOM dilewati.")
+                continue
+            if cat_id not in tpl_cache:
+                tpl_cache[cat_id] = await _active_template_for_catalog(db, cat_id)
+            tpl = tpl_cache[cat_id]
+            if not tpl:
+                cat = await db.dewi_maklon_buyer_catalog.find_one({'id': cat_id}, {'_id': 0, 'artikel_code': 1, 'product_name': 1})
+                nama = (cat or {}).get('artikel_code') or (cat or {}).get('product_name') or cat_id
+                warnings.append(f"Artikel '{nama}' belum punya BOM Template AKTIF — buat/aktifkan dulu di Katalog Buyer.")
+                continue
+        templates_used[tpl['id']] = {'template_id': tpl['id'], 'version': tpl.get('version'),
+                                     'label': tpl.get('version_label', ''),
+                                     'catalog_id': tpl.get('buyer_catalog_id')}
+        for m in (tpl.get('materials') or []):
+            name = (m.get('material_name') or '').strip()
+            per = float(m.get('qty_per_pcs') or 0)
+            if not name or per <= 0:
+                continue
+            unit = (m.get('unit') or 'pcs').strip() or 'pcs'
+            line_type, mcat = _classify_line(m)
+            key = (name.lower(), unit.lower())
+            row = agg.setdefault(key, {
+                'material_name': name, 'unit': unit, 'material_category': mcat,
+                'line_type': line_type, 'qty_estimated': 0.0,
+                'cost_per_unit': float(m.get('cost_per_unit') or 0),
+                'supplier': m.get('supplier', ''), 'notes': m.get('notes', ''),
+                'source_template_id': tpl['id'], 'source_template_version': tpl.get('version'),
+                'source_template_label': tpl.get('version_label', ''),
+            })
+            row['qty_estimated'] += per * qty
+            row['cost_per_unit'] = row['cost_per_unit'] or float(m.get('cost_per_unit') or 0)
+    return agg, total_pcs, warnings, templates_used
+
+
+async def accessory_rows_from_materials(db, materials: List[dict]) -> tuple:
+    """Baris BOM pcs → payload kebutuhan aksesoris PO. (rows, unlinked, uom_issues).
+
+    `rows` belum punya `id`/`po_id`/`source`/`created_at` — pemanggil yang
+    menentukan (explode menyimpannya, pratinjau hanya menampilkan).
+    """
+    by_name, by_code = await _material_lookup(db)
+    rows, unlinked, uom_issues = [], [], []
+    for m in materials:
+        if m.get('line_type') != 'accessory' or float(m.get('qty_estimated') or 0) <= 0:
+            continue
+        nm = (m.get('material_name') or '').strip()
+        mat = by_name.get(nm.lower()) or by_code.get(nm.upper())
+        if not mat:
+            unlinked.append(nm)
+        # 2026-08-02 · SATUAN: qty_needed HARUS satuan dasar material (dibandingkan
+        # dengan stok & harga per satuan dasar). Template BOM maklon menulis satuan
+        # bebas (mis. 'lusin'), jadi dikonversi dulu lewat core.bom_uom.
+        factor, base_unit, uom_status, uom_note = bom_uom.line_factor(mat, m.get('unit'))
+        qty_base = round(float(m['qty_estimated']) * factor, 3)
+        if uom_status == 'mismatch':
+            uom_issues.append(f"{nm}: {uom_note}")
+        rows.append({
+            'accessory_id': (mat or {}).get('id'),
+            'accessory_name': nm,
+            'accessory_code': (mat or {}).get('code', ''),
+            'qty_needed': qty_base,
+            'unit': base_unit if mat else (m.get('unit') or 'pcs'),
+            'qty_input': round(float(m['qty_estimated']), 3),
+            'unit_input': m.get('unit', 'pcs'),
+            'uom_factor': round(factor, 8),
+            'uom_status': uom_status,
+            'notes': f"Auto dari BOM Template maklon v{m.get('source_template_version', '-')}"
+                     + (f" · {m.get('unit')}→{base_unit}" if factor != 1 else ''),
+            'unlinked': mat is None,
+        })
+    return rows, unlinked, uom_issues
+
+
+class PreviewItemIn(BaseModel):
+    catalog_item_id: Optional[str] = Field(default='', description='FK dewi_maklon_buyer_catalog')
+    catalog_id: Optional[str] = Field(default='', description='alias catalog_item_id')
+    qty: int = Field(default=0, ge=0)
+    label: Optional[str] = Field(default='')
+
+
+class PreviewAccessoriesIn(BaseModel):
+    items: List[PreviewItemIn] = Field(default_factory=list)
+    template_id: Optional[str] = None
+
+
+@router.post('/bom-templates/preview-accessories')
+async def preview_accessories_from_bom(payload: PreviewAccessoriesIn,
+                                       user: dict = Depends(require_auth)):
+    """PRATINJAU kebutuhan aksesoris untuk item PO yang MASIH DI FORM (belum disimpan).
+
+    Read-only: tidak menulis `po_accessories`, `dewi_maklon_bom`, atau apa pun.
+    Angkanya identik dengan yang akan tersimpan saat PO disimpan karena memakai
+    `aggregate_template_lines` + `accessory_rows_from_materials` yang sama.
+    """
+    db = get_db()
+    norm = [{'catalog_id': (it.catalog_item_id or it.catalog_id or '').strip(),
+             'qty': int(it.qty or 0), 'label': it.label or ''}
+            for it in (payload.items or [])]
+    forced = None
+    if payload.template_id:
+        forced = await db.dewi_maklon_bom_templates.find_one({'id': payload.template_id}, {'_id': 0})
+        if not forced:
+            raise HTTPException(404, 'BOM Template tidak ditemukan')
+    agg, total_pcs, warnings, templates_used = await aggregate_template_lines(
+        db, norm, forced_template=forced)
+    materials = []
+    for row in agg.values():
+        materials.append({
+            'material_name': row['material_name'],
+            'material_category': row['material_category'],
+            'line_type': row['line_type'],
+            'unit': row['unit'],
+            'qty_estimated': round(row['qty_estimated'], 4),
+            'source_template_version': row.get('source_template_version'),
+        })
+    acc_rows, unlinked, uom_issues = await accessory_rows_from_materials(db, materials)
+    if unlinked:
+        warnings.append(
+            'Baris BOM berikut belum tertaut master material sehingga stoknya tidak bisa dicek: '
+            + ', '.join(unlinked[:10]))
+    warnings.extend(uom_issues[:10])
+    return {
+        'ok': True,
+        'total_pcs': total_pcs,
+        'accessories': acc_rows,
+        'bulk': [m for m in materials if m.get('line_type') == 'bulk'],
+        'templates_used': list(templates_used.values()),
+        'warnings': warnings,
+    }

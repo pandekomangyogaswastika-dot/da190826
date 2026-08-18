@@ -11,7 +11,7 @@ Test Coverage:
 - End-to-end P2P flow (create PO → approve → create GR → receive → verify stock)
 - Status transition from partially_received → fully_received
 
-Public endpoint: https://smart-preview-pdf.preview.emergentagent.com
+Public endpoint: https://erp-docs-5.preview.emergentagent.com
 Admin credentials: admin@garment.com / Admin@123
 """
 
@@ -21,7 +21,7 @@ import uuid
 from datetime import datetime, date
 from typing import Optional, Dict, Any, List
 
-BASE_URL = "https://smart-preview-pdf.preview.emergentagent.com"
+BASE_URL = "https://erp-docs-5.preview.emergentagent.com"
 ADMIN_EMAIL = "admin@garment.com"
 ADMIN_PASSWORD = "Admin@123"
 

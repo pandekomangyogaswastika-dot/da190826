@@ -15,7 +15,7 @@ import uuid
 from datetime import datetime
 
 # PUBLIC ENDPOINT
-BASE_URL = "https://smart-preview-pdf.preview.emergentagent.com"
+BASE_URL = "https://erp-docs-5.preview.emergentagent.com"
 
 class MergeVerificationTester:
     def __init__(self):

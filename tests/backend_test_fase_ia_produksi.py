@@ -21,7 +21,7 @@ import requests
 import sys
 from datetime import datetime
 
-BASE_URL = "https://smart-preview-pdf.preview.emergentagent.com/api"
+BASE_URL = "https://erp-docs-5.preview.emergentagent.com/api"
 
 class FaseIAProductionTester:
     def __init__(self):

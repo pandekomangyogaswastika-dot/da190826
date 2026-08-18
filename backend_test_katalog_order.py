@@ -8,7 +8,7 @@ import sys
 import requests
 from datetime import datetime
 
-BASE = os.environ.get('REACT_APP_BACKEND_URL', 'https://smart-preview-pdf.preview.emergentagent.com')
+BASE = os.environ.get('REACT_APP_BACKEND_URL', 'https://erp-docs-5.preview.emergentagent.com')
 
 class TestRunner:
     def __init__(self):

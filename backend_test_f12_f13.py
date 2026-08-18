@@ -8,7 +8,7 @@ import sys
 from datetime import date, timedelta
 
 # Public endpoint from frontend/.env
-BASE_URL = "https://smart-preview-pdf.preview.emergentagent.com/api"
+BASE_URL = "https://erp-docs-5.preview.emergentagent.com/api"
 
 # Test credentials from review_request
 ADMIN_EMAIL = "admin@garment.com"

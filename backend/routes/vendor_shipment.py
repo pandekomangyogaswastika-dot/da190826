@@ -183,7 +183,11 @@ async def get_vendor_shipments(request: Request):
         po_ids_s = {s['po_id']} if s.get('po_id') else set()
         for item in items:
             if item.get('po_id'): po_ids_s.add(item['po_id'])
-        po_acc_count = sum(acc_count_by_po.get(pid, 0) for pid in po_ids_s)
+        # Surat jalan ANAK tidak membawa kebutuhan aksesoris PO (lihat catatan di
+        # `get_vendor_shipment`) — hitungannya harus 0 supaya panel aksesoris di
+        # daftar tidak menjanjikan barang yang tidak ada di kiriman itu.
+        po_acc_count = (0 if s.get('parent_shipment_id')
+                        else sum(acc_count_by_po.get(pid, 0) for pid in po_ids_s))
         result.append({**serialize_doc(s), 'items': serialize_doc(items),
                        'child_shipment_count': child_ships, 'has_children': child_ships > 0,
                        'po_accessories_count': po_acc_count})
@@ -224,10 +228,25 @@ async def get_vendor_shipment(sid: str, request: Request):
         for cs in child_ships
     ]
     # ── 10E: batch PO accessories + PO info in 2 queries instead of 2N ──
+    # ═══════════════════════════════════════════════════════════════════════
+    # SURAT JALAN ANAK TIDAK MEMBAWA AKSESORIS PO (keluhan pemilik 2026-06)
+    # ═══════════════════════════════════════════════════════════════════════
+    # `po_accessories` adalah KEBUTUHAN aksesoris seluruh PO — bukan isi kiriman.
+    # Untuk surat jalan ANAK (ADDITIONAL/REPLACEMENT/REWORK) isinya hanya barang
+    # yang benar-benar dikirim ulang, jadi mengirimkan daftar aksesoris PO membuat
+    # form inspeksi vendor memuat baris aksesoris yang TIDAK pernah dikirim →
+    # vendor mengisinya "kurang" → lahir permintaan aksesoris palsu, dan kiriman
+    # pengganti "selalu membawa aksesoris". Dibuktikan
+    # `scripts/_repro_5bug_produksi_maklon.py` (BUG 5), dijaga INV-F27.
+    # Aksesoris pada surat jalan anak HANYA dari `accessory_shipment_items`-nya.
+    is_child = bool(s.get('parent_shipment_id'))
     po_ids: set = set()
-    if s.get('po_id'): po_ids.add(s['po_id'])
-    for item in items:
-        if item.get('po_id'): po_ids.add(item['po_id'])
+    if not is_child:
+        if s.get('po_id'):
+            po_ids.add(s['po_id'])
+        for item in items:
+            if item.get('po_id'):
+                po_ids.add(item['po_id'])
     po_ids_list = list(po_ids)
     all_po_accs = await db.po_accessories.find({'po_id': {'$in': po_ids_list}}, {'_id': 0}).to_list(None) if po_ids_list else []
     all_po_docs = await db.production_pos.find({'id': {'$in': po_ids_list}}, {'_id': 0, 'id': 1, 'po_number': 1}).to_list(None) if po_ids_list else []
@@ -243,6 +262,9 @@ async def get_vendor_shipment(sid: str, request: Request):
     result['accessory_items'] = serialize_doc(accessory_items)
     result['child_shipments'] = child_with_items
     result['po_accessories'] = serialize_doc(po_accessories_all)
+    # Layar perlu tahu ALASANNYA kosong, bukan sekadar kosong.
+    result['accessories_scope'] = 'own' if is_child else 'po'
+    result['is_child_shipment'] = is_child
     result['allowed_next'] = ['Received'] if s.get('status') == 'Sent' else []
     return result
 

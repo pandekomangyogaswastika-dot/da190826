@@ -3,7 +3,7 @@
 > Dihasilkan `scripts/gate.sh`. JANGAN edit manual.
 > "Selesai" hanya sah bila receipt HIJAU untuk cakupan yang TIDAK di-skip.
 
-- **Waktu:** 2026-08-18 05:40:42  ·  **Durasi:** 85s  ·  **Mode:** cepat
+- **Waktu:** 2026-08-18 13:04:20  ·  **Durasi:** 85s  ·  **Mode:** cepat
 - **Backend:** RUNNING · **Auth:** READY
 
 | Gate | Hasil |
@@ -45,6 +45,7 @@
 | STOK/DOKUMEN — Arus keluar Cutting berdokumen, stok turun sekali (INV-F24) | PASS |
 | DATA — Setelan penomoran dokumen benar-benar ditegakkan (INV-F25) | PASS |
 | DOKUMEN — Template PDF (kop/logo/kolom/TTD) benar-benar tercetak (INV-F26) | PASS |
+| STOK/DOKUMEN — Permak menaikkan sisa kirim · dispatch lanjutan · aksesoris BOM (INV-F27) | PASS |
 | FITUR MATI — handler tergabung / kode setelah return | PASS |
 | FITUR MATI — panggilan FE ke endpoint yang tak ada | PASS |
 | NAVIGASI — menu hantu / duplikat / kedalaman | PASS |

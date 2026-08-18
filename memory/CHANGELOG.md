@@ -1,3 +1,63 @@
+# [2026-06-18 #20] **LIMA CACAT PRODUKSI/MAKLON DITUTUP** — permak menaikkan sisa kirim · dispatch lanjutan · aksesoris BOM di form PO · vendor CMT bisa minta PENGGANTI
+
+## Temuan pembuka sesi: dua perbaikan layar sebenarnya BELUM PERNAH DITULIS
+Sesi sebelumnya melaporkan tujuh berkas selesai, tetapi pengukuran ulang menunjukkan:
+`BuyerShipmentModule.jsx` **tidak tersentuh sama sekali** (tombol "+ Dispatch" tidak ada) dan
+`ProductionPOModule.jsx` hanya berisi **state `bomAcc` kosong** tanpa pemanggilan server maupun
+panel — jadi dua dari lima keluhan pemilik masih 100% tidak terjangkau pemakai walaupun backendnya
+sudah jadi. Tidak ada gate, tidak ada uji, dan komentar kode sudah menjanjikan gate **INV-F27** yang
+belum pernah dibuat. Pelajarannya dicatat: *backend jadi ≠ fitur ada*.
+
+## Yang dikerjakan
+- **BUG 1 — permak ↔ reject (backend, dari sesi lalu, kini TERUKUR).** Permak dari form manual
+  ("Buat Permak Baru", tanpa memilih baris penerimaan) ditautkan server ke baris penerimaan yang
+  masih punya sisa reject (FIFO, `source_link_auto=true`, dipecah bila sisa reject tersebar di
+  beberapa baris). Permak berhasil ⇒ `qty_reworked_ok` naik, stok FG dilepas dari karantina, dan
+  **sisa bisa kirim ke buyer naik** sebesar qty permak. Qty melebihi sisa reject ditolak 400 dengan
+  pesan yang menjelaskan, tanpa meninggalkan dokumen yatim.
+- **BUG 2 — dispatch lanjutan pada surat jalan yang SAMA.** Backend menerima `shipment_id`
+  (404 bila tidak ada — diperiksa **sebelum** pagar qty supaya pesannya tidak menyesatkan, 400 bila
+  tipe penerima beda, 403 bila bukan milik vendor) dan menambah `dispatch_seq` berikutnya. **LAYAR
+  (baru sesi ini):** tombol **"+ Dispatch"** di kolom Aksi tiap surat jalan yang belum 100%, modal
+  "Lanjutkan Dispatch — <nomor>" dengan banner penjelas, nomor SJ & pilihan PO **terkunci**, sumber
+  penerimaan + sisa bisa kirim dimuat ulang dari backend, tombol kirim berbunyi "Tambah Dispatch".
+  Hasil: satu PO = satu surat jalan yang progresnya naik (40 → 70 → 100), bukan tiga nomor terpisah.
+- **BUG 3 — aksesoris BOM di form buat PO maklon (LAYAR baru sesi ini).** Panel **read-only**
+  "Aksesoris dari BOM Katalog" ikut berubah tiap artikel/qty disunting (debounce 400 ms) lewat
+  `POST /api/dewi/maklon/bom-templates/preview-accessories` — **mesin yang sama** dengan yang menulis
+  `po_accessories` saat PO disimpan, jadi angka di layar tidak mungkin berbeda dari yang tersimpan.
+  Bagian "Aksesoris (Add-on)" diberi label "hanya yang DI LUAR BOM" agar tidak diketik dobel.
+- **BUG 4 — vendor CMT bisa mengajukan material PENGGANTI.** Tombol "Buat Permintaan Pengganti" di
+  tab PENGGANTI portal CMT + pemilih surat jalan + modal yang meneruskan `request_type` (bukan
+  `ADDITIONAL` yang dihardcode).
+- **BUG 5 — surat jalan ANAK tidak membawa aksesoris PO.** Detail & daftar sepakat:
+  `po_accessories=[]`, `accessories_scope='own'`, `is_child_shipment=true`, `po_accessories_count=0`
+  — kiriman pengganti hanya membawa isi kirimannya, jadi form inspeksi vendor tidak lagi memunculkan
+  aksesoris yang tak pernah dikirim.
+
+## Bukti
+- **Sebelum:** `scripts/_repro_5bug_produksi_maklon.py` (dibuat sesi lalu) — kelima bug kini
+  dilaporkan "TIDAK ADA".
+- **Sesudah, permanen:** gate baru **`scripts/verify_permak_dispatch_aksesoris.py` (INV-F27)** —
+  9 invarian HIJAU, membangun skenarionya sendiri lewat pembangun yang sama dengan INV-F16 (PO 100 =
+  90 lolos QC + 10 reject), termasuk **F27-8 yang memeriksa pintunya ADA di layar** (tombol
+  "+ Dispatch", panel aksesoris BOM, tombol permintaan pengganti). Terdaftar di `scripts/gate.sh`.
+- **Gate penuh:** `bash scripts/gate.sh` → **23 PASS · 1 WARN · 0 FAIL · VERDICT HIJAU** (85 s).
+- **Uji layar nyata (testing agent, iterasi 74):** tombol/banner/modal dispatch lanjutan,
+  panel aksesoris BOM di modal "Buat PO Maklon", dan alur tombol PENGGANTI di portal vendor CMT
+  semuanya terklik dan berperilaku benar; 0 isu kritis, 0 isu UI.
+  Berkas uji tambahan `backend/tests/test_inv_f27_bugs.py` (butuh data uji lebih dulu:
+  `python3 scripts/verify_fase_e_kapasitas_kirim.py --scenario-only`, kalau tidak ia SKIP).
+
+## Catatan lingkungan
+Preview menyajikan **bundel statis** (`node static_server.js`), bukan dev server — setiap perubahan
+JSX **wajib** `bash scripts/rebuild_frontend.sh` sebelum diuji di layar (lihat
+`memory/PREVIEW_STABLE_MODE.md`). `memory/test_credentials.md` yang sebelumnya kosong sudah diisi
+ulang dengan 14 akun yang diverifikasi login HTTP 200.
+
+
+---
+
 # [2026-08-17 #18] **FASE G DITEGAKKAN** — setelan penomoran tidak lagi berbohong · Dashboard Marketing terbukti SUDAH selesai
 
 ## Temuan pertama: satu dari dua permintaan sudah selesai (ROADMAP basi)
@@ -3036,7 +3096,7 @@ Selisih 20 pcs = **4 run kebocoran × 5 pcs** (Temuan 1) — `plan.md:115` sendi
 fiktif** (bagian EKSEKUSI menghapus baris stok lalu insert dari baseline) ·
 `tests/backend_test_fase12.py` hard-assert `9667750 (±100)`/`32220 (±10)` ⇒ **FAIL PASTI**.
 * **Bonus temuan:** berkas uji yang sama mematok `BASE_URL` ke preview container lama
-  (`https://smart-preview-pdf.preview.emergentagent.com`) yang **sudah mati** ⇒ menguji host salah.
+  (`https://erp-docs-5.preview.emergentagent.com`) yang **sudah mati** ⇒ menguji host salah.
 * **Fix:** SSOT tunggal `scripts/lib/acc_baseline.py` — semua total **DITURUNKAN** dari tabel
   `STOCK_BASELINE × COST_BASELINE` + `assert` pengaman (qty **32.200**, nilai **Rp 9.663.750**,
   8 bernilai / 2 belum, unvalued_qty 3.300). `cleanup_fase10_qa.py` &

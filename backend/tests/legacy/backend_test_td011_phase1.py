@@ -18,7 +18,7 @@ import requests
 import sys
 
 # Public endpoint from frontend/.env
-API = "https://smart-preview-pdf.preview.emergentagent.com"
+API = "https://erp-docs-5.preview.emergentagent.com"
 
 class TD011Phase1Tester:
     def __init__(self):

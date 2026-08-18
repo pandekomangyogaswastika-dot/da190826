@@ -56,6 +56,13 @@ export default function VendorMaterialRequests({ user }) {
   const [manualReqShipment, setManualReqShipment] = useState(null);
   const [manualReqItems, setManualReqItems] = useState([]);
   const [loadingShipPicker, setLoadingShipPicker] = useState(false);
+  // Jenis permintaan yang sedang dibuat lewat picker: ADDITIONAL | REPLACEMENT.
+  // 2026-06 — tombol buat DULU hanya dirender di tab ADDITIONAL, sementara jalur
+  // lama untuk PENGGANTI (Laporan Cacat Material) sudah dimatikan backend
+  // (HTTP 410). Akibatnya vendor CMT benar-benar TIDAK BISA mengajukan material
+  // pengganti sama sekali — permintaannya harus dititipkan lewat telepon/chat
+  // dan tidak pernah tercatat di ERP.
+  const [createType, setCreateType] = useState('ADDITIONAL');
 
   useEffect(() => {
     fetchRequests();
@@ -141,12 +148,15 @@ export default function VendorMaterialRequests({ user }) {
       defaultReason: req.reason || '',
       previousRequestId: req.id,
       previousRequestNumber: req.request_number,
+      // ajukan ulang WAJIB memakai jenis yang sama (tambahan vs pengganti)
+      requestType: req.request_type || 'ADDITIONAL',
     });
     setShowDetail(false);
   };
 
   // ─── Manual Request: pilih shipment yang sudah ter-inspeksi ────────────────
-  const openShipmentPicker = async () => {
+  const openShipmentPicker = async (type = 'ADDITIONAL') => {
+    setCreateType(type);
     setLoadingShipPicker(true);
     setShowShipmentPicker(true);
     try {
@@ -249,13 +259,21 @@ export default function VendorMaterialRequests({ user }) {
             Kelola permintaan material tambahan (missing) dan pengganti (cacat) ke ERP.
           </p>
         </div>
-        {isAdditional && (
+        {isAdditional ? (
           <button
-            onClick={openShipmentPicker}
+            onClick={() => openShipmentPicker('ADDITIONAL')}
             className="flex items-center gap-2 px-4 py-2 bg-amber-600 text-white rounded-lg text-sm font-medium hover:bg-amber-700 shadow-sm"
             data-testid="vendor-create-manual-request-btn"
           >
             <Plus className="w-4 h-4" /> Buat Permintaan Manual
+          </button>
+        ) : (
+          <button
+            onClick={() => openShipmentPicker('REPLACEMENT')}
+            className="flex items-center gap-2 px-4 py-2 bg-red-600 text-white rounded-lg text-sm font-medium hover:bg-red-700 shadow-sm"
+            data-testid="vendor-create-replacement-request-btn"
+          >
+            <Plus className="w-4 h-4" /> Buat Permintaan Pengganti
           </button>
         )}
       </div>
@@ -324,7 +342,7 @@ export default function VendorMaterialRequests({ user }) {
       >
         {isAdditional
           ? '➕ Permintaan tambahan dibuat saat ada material missing/kurang dari inspeksi. Anda dapat mengajukan ulang jika ditolak admin, atau membuat permintaan manual untuk shipment yang sudah ter-inspeksi.'
-          : '🔄 Permintaan pengganti dibuat saat ada material cacat/rusak (dari Laporan Cacat Material). Approval menghasilkan child shipment pengganti.'}
+          : '🔄 Permintaan pengganti untuk material CACAT/RUSAK (bukan kurang kirim). Klik "Buat Permintaan Pengganti", pilih surat jalan yang sudah ter-inspeksi, lalu isi qty + cacatnya per item. Setelah disetujui ERP, terbit surat jalan pengganti (kode "-R1") yang muncul di Penerimaan Material Anda.'}
       </div>
 
       {/* Filter row */}
@@ -610,14 +628,21 @@ export default function VendorMaterialRequests({ user }) {
       {/* Shipment Picker Modal */}
       {showShipmentPicker && (
         <Modal
-          title="Pilih Shipment untuk Permintaan Manual"
+          title={createType === 'REPLACEMENT'
+            ? 'Pilih Surat Jalan untuk Permintaan Pengganti'
+            : 'Pilih Shipment untuk Permintaan Manual'}
           onClose={() => setShowShipmentPicker(false)}
           size="lg"
         >
           <div className="space-y-3">
-            <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-sm text-amber-800">
+            <div className={`border rounded-lg p-3 text-sm ${createType === 'REPLACEMENT'
+              ? 'bg-red-50 border-red-200 text-red-800'
+              : 'bg-amber-50 border-amber-200 text-amber-800'}`}
+              data-testid="ship-picker-hint">
               <AlertCircle className="w-4 h-4 inline mr-1.5" />
-              Pilih shipment yang sudah ter-inspeksi untuk membuat permintaan material tambahan secara manual.
+              {createType === 'REPLACEMENT'
+                ? 'Pilih surat jalan yang sudah ter-inspeksi, lalu tandai item yang CACAT/RUSAK beserta qty penggantinya.'
+                : 'Pilih shipment yang sudah ter-inspeksi untuk membuat permintaan material tambahan secara manual.'}
             </div>
             {loadingShipPicker ? (
               <div className="p-8 text-center text-muted-foreground/70 text-sm">Memuat shipment...</div>
@@ -677,6 +702,7 @@ export default function VendorMaterialRequests({ user }) {
           previousRequestId={resubmitData.previousRequestId}
           previousRequestNumber={resubmitData.previousRequestNumber}
           mode="resubmit"
+          requestType={resubmitData.requestType || 'ADDITIONAL'}
           onClose={() => setResubmitData(null)}
           onSuccess={() => {
             setResubmitData(null);
@@ -690,8 +716,11 @@ export default function VendorMaterialRequests({ user }) {
         <AdditionalRequestModal
           shipment={manualReqShipment}
           defaultItems={manualReqItems}
-          defaultReason={`Permintaan tambahan manual untuk shipment ${manualReqShipment.shipment_number}`}
+          defaultReason={createType === 'REPLACEMENT'
+            ? `Material cacat/rusak pada shipment ${manualReqShipment.shipment_number} — mohon diganti`
+            : `Permintaan tambahan manual untuk shipment ${manualReqShipment.shipment_number}`}
           mode="manual"
+          requestType={createType}
           onClose={() => {
             setManualReqShipment(null);
             setManualReqItems([]);

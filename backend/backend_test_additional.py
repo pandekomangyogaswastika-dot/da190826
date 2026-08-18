@@ -9,7 +9,7 @@ import os
 from datetime import datetime
 
 # Backend URL from environment
-BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "https://smart-preview-pdf.preview.emergentagent.com")
+BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "https://erp-docs-5.preview.emergentagent.com")
 
 # Test credentials
 ADMIN_CRED = {"email": "admin@garment.com", "password": "Admin@123"}

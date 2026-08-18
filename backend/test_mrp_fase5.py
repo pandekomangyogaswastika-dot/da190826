@@ -6,7 +6,7 @@ import requests
 import sys
 
 # Use PUBLIC endpoint from frontend .env
-BASE_URL = "https://smart-preview-pdf.preview.emergentagent.com"
+BASE_URL = "https://erp-docs-5.preview.emergentagent.com"
 API_PREFIX = "/api"
 
 # Test credentials

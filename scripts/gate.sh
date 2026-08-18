@@ -529,6 +529,28 @@ if [ $AUTH_READY -eq 1 ]; then
   run_gate "DOKUMEN — Template PDF (kop/logo/kolom/TTD) benar-benar tercetak (INV-F26)" \
            "python3 scripts/verify_fase_i_pdf_template.py"
 
+  # ── INV-F27 (2026-06, keluhan pemilik) — PERMAK ↔ REJECT, DISPATCH LANJUTAN,
+  #    AKSESORIS BOM & KIRIMAN PENGGANTI ────────────────────────────────────────
+  # Lima cacat yang TERUKUR sebelum perbaikan (bukti "sebelum" tetap disimpan di
+  # `scripts/_repro_5bug_produksi_maklon.py`):
+  #   · permak yang dibuat dari form "Buat Permak Baru" tersimpan TANPA tautan
+  #     baris penerimaan ⇒ permak berhasil tidak pernah menaikkan hasil permak,
+  #     stok FG tidak dilepas dari karantina, dan barang yang sudah bagus MUSTAHIL
+  #     dikirim ke buyer (pagar kirim membaca baris penerimaan);
+  #   · pengiriman bertahap tidak bisa dilanjutkan: setiap simpan melahirkan surat
+  #     jalan BARU dengan nomor baru dan dispatch_seq kembali ke 1, jadi satu PO
+  #     punya beberapa surat jalan dan tidak satu pun mencapai 100%;
+  #   · form buat PO maklon tidak menampilkan aksesoris BOM katalog sama sekali ⇒
+  #     pemakai menyangka BOM belum kena lalu mengetik ulang (baris kembar);
+  #   · vendor CMT tidak punya SATU pintu pun untuk meminta material PENGGANTI
+  #     (jalur lamanya sudah dimatikan backend dengan HTTP 410);
+  #   · surat jalan ANAK (pengganti) tetap membawa daftar aksesoris PO ⇒ form
+  #     inspeksi vendor memuat aksesoris yang tak pernah dikirim.
+  # Gate ini menguji PERILAKU lewat endpoint asli (memakai pembangun skenario yang
+  # sama dengan INV-F16, bukan skenario kedua) + memastikan pintunya ADA di layar.
+  run_gate "STOK/DOKUMEN — Permak menaikkan sisa kirim · dispatch lanjutan · aksesoris BOM (INV-F27)" \
+           "python3 scripts/verify_permak_dispatch_aksesoris.py"
+
 else
   for g in "state machine jurnal" "nomor dokumen kembar" "batas nilai AR/AP" \
            "RBAC/IDOR" "input jahat 4xx" "endpoint kritis" \
@@ -556,7 +578,8 @@ else
            "Surat jalan satu daftar + pintu lama (INV-F23)" \
            "Arus keluar Cutting berdokumen (INV-F24)" \
            "Setelan penomoran ditegakkan (INV-F25)" \
-           "Template PDF tercetak & satu pintu (INV-F26)"; do
+           "Template PDF tercetak & satu pintu (INV-F26)" \
+           "Permak/dispatch lanjutan/aksesoris BOM (INV-F27)"; do
     skip_gate "$g" "backend/auth belum siap"
   done
 fi

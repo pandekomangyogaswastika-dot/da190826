@@ -11,7 +11,7 @@ import time
 import requests
 import pytest
 
-BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "https://smart-preview-pdf.preview.emergentagent.com").rstrip("/")
+BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "https://erp-docs-5.preview.emergentagent.com").rstrip("/")
 ADMIN_EMAIL = "admin@garment.com"
 ADMIN_PASSWORD = "Admin@123"
 API = f"{BASE_URL}/api"

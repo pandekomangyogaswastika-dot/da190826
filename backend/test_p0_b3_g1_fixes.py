@@ -13,7 +13,7 @@ import sys
 from datetime import datetime
 from typing import Dict, Optional
 
-BASE_URL = "https://smart-preview-pdf.preview.emergentagent.com"
+BASE_URL = "https://erp-docs-5.preview.emergentagent.com"
 
 # Test credentials from test_credentials.md
 ADMIN_CREDS = {"email": "admin@garment.com", "password": "Admin@123"}

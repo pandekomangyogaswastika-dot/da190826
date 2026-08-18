@@ -29,6 +29,16 @@ export default function ProductionPOModule({ userRole, hasPerm = () => false, bu
   const [vendors, setVendors] = useState([]);
   const [buyers, setBuyers] = useState([]);
   const [accessories, setAccessories] = useState([]);
+  // ── AKSESORIS BOM MUAT OTOMATIS DI FORM (keluhan pemilik 2026-06) ─────────
+  // Katalog maklon sudah punya BOM aksesoris dan angkanya sudah benar di Surat
+  // Jalan/SPP, TAPI form buat PO tidak menampilkannya sama sekali — pemakai
+  // menyangka BOM belum kena lalu mengetik ulang barisnya (kerja dobel & baris
+  // kembar). Panel di bawah membaca `POST /api/dewi/maklon/bom-templates/
+  // preview-accessories`, yaitu MESIN YANG SAMA dengan yang menulis
+  // `po_accessories` saat PO disimpan — jadi angka di layar tidak mungkin
+  // berbeda dari yang tersimpan. Baris ini TIDAK dikirim di payload (backend
+  // yang menuliskannya) supaya tidak ada baris kembar.
+  const [bomAcc, setBomAcc] = useState({ rows: [], warnings: [], total_pcs: 0, loading: false });
   const [rahazaVariants, setRahazaVariants] = useState({}); // Fase 2: cache varian internal per model_id
   const [showModal, setShowModal] = useState(false);
   const [showDetail, setShowDetail] = useState(false);
@@ -98,6 +108,41 @@ export default function ProductionPOModule({ userRole, hasPerm = () => false, bu
     if (isInternal) { fetchModels(); fetchSizes(); }
     else { fetchBuyers(); }
   }, [isInternal]);
+
+  // Pratinjau aksesoris BOM ikut berubah setiap artikel/qty item berubah.
+  // Kuncinya diringkas jadi string supaya efek tidak jalan saat field lain
+  // (mis. nomor seri) disunting; debounce 400ms supaya ketikan qty tidak
+  // memanggil server per angka.
+  const bomAccKey = isInternal ? '' : (form.items || [])
+    .map(it => `${it.catalog_item_id || ''}:${Number(it.qty) || 0}`).join('|');
+  useEffect(() => {
+    if (isInternal || !showModal) {
+      setBomAcc({ rows: [], warnings: [], total_pcs: 0, loading: false });
+      return;
+    }
+    const payloadItems = (form.items || [])
+      .filter(it => it.catalog_item_id && Number(it.qty) > 0)
+      .map(it => ({ catalog_item_id: it.catalog_item_id, qty: Number(it.qty),
+        label: it.product_name || it.sku || '' }));
+    if (payloadItems.length === 0) {
+      setBomAcc({ rows: [], warnings: [], total_pcs: 0, loading: false });
+      return;
+    }
+    setBomAcc(s => ({ ...s, loading: true }));
+    const t = setTimeout(async () => {
+      try {
+        const res = await apiPost('/dewi/maklon/bom-templates/preview-accessories',
+          { items: payloadItems });
+        setBomAcc({ rows: res?.accessories || [], warnings: res?.warnings || [],
+          total_pcs: res?.total_pcs || 0, loading: false });
+      } catch (e) {
+        setBomAcc({ rows: [], total_pcs: 0, loading: false,
+          warnings: [`Gagal memuat aksesoris BOM: ${e.message || 'kesalahan jaringan'}`] });
+      }
+    }, 400);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bomAccKey, isInternal, showModal]);
 
   const refetchPOs = () => setRefetchKey((k) => k + 1);
 
@@ -1016,10 +1061,83 @@ export default function ProductionPOModule({ userRole, hasPerm = () => false, bu
               </div>
             )}
 
+            {/* ── Aksesoris dari BOM Katalog (otomatis, read-only) ─────────── */}
+            {!isInternal && (
+              <div data-testid="po-bom-accessories-panel">
+                <div className="flex items-center justify-between mb-2">
+                  <label className="block text-sm font-semibold text-foreground/90">
+                    Aksesoris dari BOM Katalog{' '}
+                    <span className="text-xs font-normal text-muted-foreground">(otomatis · tidak perlu diketik)</span>
+                  </label>
+                  {bomAcc.loading && (
+                    <span className="text-xs text-muted-foreground flex items-center gap-1">
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" /> menghitung…
+                    </span>
+                  )}
+                </div>
+                {bomAcc.rows.length === 0 ? (
+                  <p className="text-xs text-muted-foreground/70 italic text-center py-2 border border-dashed border-border rounded-lg"
+                    data-testid="po-bom-acc-empty">
+                    {bomAcc.loading
+                      ? 'Menghitung kebutuhan aksesoris dari BOM…'
+                      : 'Pilih artikel Katalog Buyer + isi qty — aksesoris muncul otomatis bila artikel itu punya BOM Template aktif.'}
+                  </p>
+                ) : (
+                  <div className="rounded-lg border border-emerald-200 overflow-hidden">
+                    <table className="w-full text-xs">
+                      <thead className="bg-emerald-50">
+                        <tr>
+                          <th className="text-left px-3 py-1.5 text-emerald-800">Aksesoris</th>
+                          <th className="text-left px-3 py-1.5 text-emerald-800">Kode</th>
+                          <th className="text-right px-3 py-1.5 text-emerald-800">Kebutuhan</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-emerald-100 bg-card">
+                        {bomAcc.rows.map((r, i) => (
+                          <tr key={`${r.accessory_name}-${i}`} data-testid={`po-bom-acc-row-${i}`}>
+                            <td className="px-3 py-1.5 text-foreground/90">
+                              {r.accessory_name}
+                              {r.unlinked && (
+                                <span className="ml-1.5 px-1.5 py-0.5 rounded bg-red-100 text-red-700 text-[10px] font-bold">
+                                  belum tertaut master
+                                </span>
+                              )}
+                            </td>
+                            <td className="px-3 py-1.5 font-mono text-muted-foreground">{r.accessory_code || '-'}</td>
+                            <td className="px-3 py-1.5 text-right font-bold text-emerald-700">
+                              {Number(r.qty_needed || 0).toLocaleString('id-ID')} {r.unit || 'pcs'}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                    <p className="px-3 py-1.5 bg-emerald-50/60 text-[11px] text-emerald-800">
+                      Untuk {Number(bomAcc.total_pcs || 0).toLocaleString('id-ID')} pcs. Baris ini ditulis
+                      sistem saat PO disimpan — jangan ditambahkan lagi di bawah (nanti dobel).
+                    </p>
+                  </div>
+                )}
+                {(bomAcc.warnings || []).length > 0 && (
+                  <div className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 space-y-0.5"
+                    data-testid="po-bom-acc-warning">
+                    {bomAcc.warnings.map((w, i) => (
+                      <p key={i} className="text-[11px] text-amber-800 flex gap-1.5">
+                        <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-px" />{w}
+                      </p>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
             {/* PO Accessories Add-on */}
             <div>
               <div className="flex items-center justify-between mb-2">
-                <label className="block text-sm font-semibold text-foreground/90">Aksesoris (Add-on)</label>
+                <label className="block text-sm font-semibold text-foreground/90">
+                  Aksesoris (Add-on){!isInternal && (
+                    <span className="text-xs font-normal text-muted-foreground"> — hanya yang DI LUAR BOM</span>
+                  )}
+                </label>
                 <button type="button" onClick={addAccessoryItem} className="flex items-center gap-1 text-xs text-emerald-600 hover:text-emerald-800 font-medium">
                   <Plus className="w-3.5 h-3.5" /> Tambah Aksesoris
                 </button>

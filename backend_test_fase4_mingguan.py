@@ -10,7 +10,7 @@ import sys
 import requests
 from datetime import date, datetime, timedelta, timezone
 
-BASE_URL = "https://smart-preview-pdf.preview.emergentagent.com/api"
+BASE_URL = "https://erp-docs-5.preview.emergentagent.com/api"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # TANGGAL DINAMIS (perbaikan main agent, 2026-08-10)

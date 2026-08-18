@@ -10,7 +10,7 @@ import requests
 from datetime import datetime, timezone
 
 # Test configuration
-BASE_URL = "https://smart-preview-pdf.preview.emergentagent.com"
+BASE_URL = "https://erp-docs-5.preview.emergentagent.com"
 API_URL = f"{BASE_URL}/api"
 ADMIN_EMAIL = "admin@garment.com"
 ADMIN_PASSWORD = "Admin@123"
