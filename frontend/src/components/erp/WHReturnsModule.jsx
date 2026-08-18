@@ -27,6 +27,7 @@ import OnwardCTA from './OnwardCTA';
 import { formatRupiah } from '@/lib/format';
 // F15-B — kelas Tailwind tidak boleh dirakit saat berjalan; lihat lib/tone.js
 import { tone } from '@/lib/tone';
+import DocNumberField, { useDocNumberPolicy, docNumberPayload } from './docnum/DocNumberField';
 
 const API = process.env.REACT_APP_BACKEND_URL || '';
 
@@ -147,12 +148,20 @@ function CreateModal({ onClose, onSaved, token, defaultType }) {
   });
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState('');
+  // SESI #19 — kebijakan penomoran Retur Gudang (Otomatis/Manual).
+  const numPolicy = useDocNumberPolicy('wh_returns.return_code', token);
+  const [returnCode, setReturnCode] = useState('');
 
   const submit = async () => {
     if (!form.order_number && !form.resi_number) { setErr('Nomor order atau resi wajib diisi'); return; }
+    if (numPolicy?.mode === 'manual' && !returnCode.trim()) {
+      setErr(`Nomor retur wajib diisi (pola ${numPolicy.format}).`); return;
+    }
     setSaving(true); setErr('');
     try {
-      const ret = await api('POST', '/api/wh/returns', token, form);
+      const ret = await api('POST', '/api/wh/returns', token, {
+        ...form, ...docNumberPayload(numPolicy, 'return_code', returnCode),
+      });
       onSaved(ret);
     } catch (e) { setErr(e.message); }
     finally { setSaving(false); }
@@ -163,6 +172,13 @@ function CreateModal({ onClose, onSaved, token, defaultType }) {
       <div className="bg-[var(--card-surface)] rounded-2xl shadow-xl w-full max-w-lg p-6 max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
         <h3 className="text-lg font-bold mb-4">Catat Return Baru</h3>
         <div className="space-y-3">
+          <DocNumberField
+            policy={numPolicy}
+            value={returnCode}
+            onChange={setReturnCode}
+            label="Nomor Retur"
+            testId="whret-number"
+          />
           {/* Type */}
           <div>
             <label className="text-xs text-muted-foreground block mb-1">Tipe Return *</label>
@@ -260,7 +276,7 @@ function DetailPanel({ ret, token, onClose, onRefresh, onNavigate }) {
     try {
       const d = await api('GET', `/api/wh/returns/${ret.id}`, token);
       setData(d);
-    } catch {}
+    } catch (e) { /* muat ulang gagal — detail yang sudah tampil dibiarkan apa adanya */ }
   };
 
   const openStep = (s) => { setStep(s); setForm({}); setErr(''); };

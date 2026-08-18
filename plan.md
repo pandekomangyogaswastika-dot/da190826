@@ -1112,3 +1112,13 @@ harus tetap HIJAU seluruhnya.
   memberi catatan. Dijaga invarian P9 gate INV-F26.
 - `bash scripts/gate.sh` → **VERDICT HIJAU**: 44/44 gate PASS · 0 FAIL · 0 SKIP
   (termasuk INV-F17, INV-F25 8 invarian, INV-F26 9 invarian).
+
+## LANJUTAN SESI #19 — Penomoran menyeluruh (Status: COMPLETED untuk batch-2)
+- 49/49 jenis dokumen kini TERKLASIFIKASI: 14 ditegakkan · 18 "selalu otomatis"
+  (dengan alasan yang tampil di layar) · 17 menunggu disambungkan. Tidak ada lagi
+  jenis berstatus menggantung — dijaga invarian **G9** gate INV-F25 (kini 9 invarian).
+- Batch-2 ditegakkan: **PO Pembelian**, **Pengeluaran Material (MI)**, **Retur Gudang**
+  (backend `issue_number` + `<DocNumberField>` di formnya). Jalur yang lahir otomatis
+  (PO massal per vendor, MI dari produksi internal) memakai `sistem=True`.
+- `bash scripts/gate.sh` → VERDICT HIJAU (44/44 PASS · 0 FAIL · 0 SKIP).
+- Sisa 17 jenis `pending_enforce` terdaftar di `memory/SESI19_PDF_TEMPLATE.md`.

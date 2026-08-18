@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button';
 import Modal from './Modal';
 import { toast } from 'sonner';
 import * as XLSX from 'xlsx';
+import DocNumberField, { useDocNumberPolicy, docNumberPayload } from './docnum/DocNumberField';
 
 const STATUS_META = {
   draft:               { label: 'Draft',               bg: 'bg-muted dark:bg-slate-400/15',   border: 'border-border/25',   text: 'text-foreground/70', icon: FileText },
@@ -49,6 +50,11 @@ export default function PurchaseOrderModule({ token, onNavigate }) {
   const [cancelReason, setCancelReason] = useState('');
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState('');
+  // SESI #19 — kebijakan penomoran PO Pembelian (Otomatis/Manual) dari Administrasi
+  // Sistem → Penomoran Dokumen. PO adalah komitmen UANG: nomor bebas tidak bisa
+  // diurutkan maupun dicari di arsip, jadi mode manual pun wajib mengikuti pola.
+  const numPolicy = useDocNumberPolicy('rahaza_purchase_orders.po_number', token);
+  const [poNumber, setPoNumber] = useState('');
   const [bulkModal, setBulkModal] = useState(false);
   const [bulkRows, setBulkRows] = useState([]);
   const [bulkVendor, setBulkVendor] = useState('');
@@ -226,6 +232,7 @@ export default function PurchaseOrderModule({ token, onNavigate }) {
         headers,
         body: JSON.stringify({
           ...poForm,
+          ...docNumberPayload(numPolicy, 'po_number', poNumber),
           items: validItems.map(it => ({
             material_id: it.material_id || undefined,
             description: it.description || undefined,
@@ -702,6 +709,15 @@ export default function PurchaseOrderModule({ token, onNavigate }) {
                 data-testid="po-form-vendor-address"
               />
             </div>
+
+            <DocNumberField
+              policy={numPolicy}
+              value={poNumber}
+              onChange={setPoNumber}
+              label="Nomor PO"
+              testId="po-number"
+              className="mb-3"
+            />
 
             <div className="grid grid-cols-2 gap-4">
               <div>

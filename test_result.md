@@ -2191,7 +2191,7 @@ frontend:
 
 metadata:
   created_by: "main_agent"
-  version: "1.7"
+  version: "1.8"
   test_sequence: 44
   run_ui: false
 
@@ -7567,8 +7567,8 @@ Excel/PDF, kirim reminder.
 
 ## metadata:
   created_by: "main_agent"
-  version: "1.7"
-  test_sequence: 55
+  version: "1.8"
+  test_sequence: 56
   run_ui: true
 
 ## agent_communication
@@ -7648,3 +7648,26 @@ Excel/PDF, kirim reminder.
           leading kop 1,22× font (nama PT bersinggungan dengan alamat di SEMUA dokumen) dan
           `save()` yang menghapus isian lain saat menerima patch sebagian. Keduanya diperbaiki.
           BUKTI: `bash scripts/gate.sh` VERDICT HIJAU — 44/44 gate PASS, 0 FAIL, 0 SKIP.
+
+  - task: "Penomoran menyeluruh — klasifikasi 49 jenis + batch-2 ditegakkan (PO Pembelian, MI, Retur Gudang)"
+    implemented: true
+    working: true
+    file: "backend/data/doc_number_registry.py, backend/routes/{rahaza_po,rahaza_inventory_shared,rahaza_inventory_issues,production_internal_adapter,dewi_wh_returns,doc_numbering}.py, frontend/src/components/erp/{PurchaseOrderModule,RahazaMaterialIssueModule,WHReturnsModule,DocNumberingModule}.jsx, scripts/verify_fase_g2_penomoran_ditegakkan.py"
+    stuck_count: 0
+    priority: "high"
+    status_history:
+        -working: true
+        -agent: "main"
+        -comment: |
+          49/49 jenis dokumen terklasifikasi: 14 `policy_enforced` · 18 `auto_only`
+          (dengan ALASAN yang tampil di layar: lahir dari PO/GR/retur/opname/jembatan
+          maklon/kode master) · 17 `pending_enforce`. Dulu 38 jenis hanya berlabel
+          "belum ditegakkan" tanpa keterangan, jadi pemilik menunggu sesuatu yang tidak
+          akan datang. Batch-2 ditegakkan: PO Pembelian, Pengeluaran Material, Retur
+          Gudang (jalur yang lahir tanpa manusia memakai `sistem=True` dan tetap
+          otomatis — dicatat, bukan disembunyikan). Pesan penolakan mode dibedakan.
+          Gate INV-F25 kini 9 invarian (G9 menahan status menggantung/label ganda/
+          alasan kosong; G4 menguji dua jenis penolakan terpisah).
+          BUKTI: INV-F25 HIJAU 9 invarian · Retur Gudang diuji langsung lewat API
+          (auto menolak nomor ketikan; manual menolak `RET/BEBAS/1`, menerima
+          `WH-RET-99001`) · `bash scripts/gate.sh` VERDICT HIJAU 44/44 PASS.

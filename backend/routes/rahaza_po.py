@@ -25,6 +25,7 @@ from fastapi import APIRouter, Request, HTTPException, Query
 from database import get_db
 from auth import require_auth, serialize_doc, log_activity
 from utils.counters import next_counter, gen_prefixed_number
+from core.doc_number_policy import issue_number
 from core import uom as _uom          # SSOT konversi satuan (INV-UOM-1/2)
 from core import bom_uom as _bom_uom  # cakupan lebar: kemasan + global + kain
 import uuid
@@ -136,13 +137,22 @@ async def _po_flags(db, user, pos: list):
     return pos
 
 
-async def _gen_po_number(db) -> str:
-    """Nomor PO: PO-YYYYMMDD-001 — race-safe & FORMATNYA BISA DIATUR OWNER
-    (Portal Administrasi Sistem → Penomoran Dokumen, kunci
-    `rahaza_purchase_orders.po_number`)."""
-    today = date.today().strftime("%Y%m%d")
-    return await gen_prefixed_number(db, "rahaza_purchase_orders", "po_number",
-                                     f"PO-{today}-", 3)
+PO_DOCNUM_KEY = "rahaza_purchase_orders.po_number"
+
+
+async def _gen_po_number(db, requested: str = "", *, sistem: bool = False) -> str:
+    """Nomor PO: SATU PINTU kebijakan penomoran (SESI #19).
+
+    `sistem=True` dipakai jalur yang LAHIR TANPA MANUSIA (PO massal per vendor dari
+    satu permintaan): tidak ada layar tempat nomor bisa diketik, jadi jalur itu tetap
+    otomatis meskipun owner menyetel MANUAL — dan itu dicatat di `catatan` registry,
+    bukan disembunyikan.
+    """
+    if sistem:
+        today = date.today().strftime("%Y%m%d")
+        return await gen_prefixed_number(db, "rahaza_purchase_orders", "po_number",
+                                         f"PO-{today}-", 3, config_key=PO_DOCNUM_KEY)
+    return await issue_number(db, PO_DOCNUM_KEY, requested=requested)
 
 
 async def _enrich_po(db, po):
@@ -487,7 +497,7 @@ async def create_po(request: Request):
 
     doc = {
         "id": _uid(),
-        "po_number": await _gen_po_number(db),
+        "po_number": await _gen_po_number(db, (body.get("po_number") or "").strip()),
         **sup_fields,
         "po_date": body.get("po_date") or date.today().isoformat(),
         "expected_delivery_date": body.get("expected_delivery_date") or None,
@@ -1205,7 +1215,7 @@ async def bulk_import_po_csv(request: Request):
                  "vendor_address": body.get("vendor_address")})
         doc = {
             "id": _uid(),
-            "po_number": await _gen_po_number(db),
+            "po_number": await _gen_po_number(db, sistem=True),
             **sup_fields,
             "po_date": body.get("po_date") or date.today().isoformat(),
             "expected_delivery_date": body.get("expected_delivery_date") or None,

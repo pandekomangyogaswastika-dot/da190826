@@ -7,6 +7,7 @@ import Modal from './Modal';
 // Sprint A.1: UniversalScanner SSOT replaces inline BarcodeScanner
 import UniversalScanner from './scanner/UniversalScanner';
 import useUomOptions from '@/hooks/useUomOptions';
+import DocNumberField, { useDocNumberPolicy, docNumberPayload } from './docnum/DocNumberField';
 import { UomSelect, UomConversionHint, baseUnitOf } from './uom/UomPicker';
 
 // ── FASE H-6b (2026-08-17) — SATU DAFTAR UNTUK SEMUA ARUS KELUAR GUDANG ───────
@@ -68,6 +69,9 @@ export default function RahazaMaterialIssueModule({ token, onNavigate }) {
   const [detail, setDetail] = useState(null);
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState('');
+  // SESI #19 — kebijakan penomoran Pengeluaran Material (Otomatis/Manual).
+  const numPolicy = useDocNumberPolicy('rahaza_material_issues.mi_number', token);
+  const [miNumber, setMiNumber] = useState('');
   const [showScanner, setShowScanner] = useState(false);
   const [scanTarget, setScanTarget] = useState(null); // { miId, itemIdx }
   const [materials, setMaterials] = useState([]);
@@ -316,6 +320,7 @@ export default function RahazaMaterialIssueModule({ token, onNavigate }) {
     setShowCreate(false); setCreateErr(''); setJobId('');
     setManualRows([{ material_id: '', qty: '', uom: '', location_id: '' }]);
     setCreateNotes('');
+    setMiNumber('');
   };
 
   const readErr = async (r, fallback) => {
@@ -373,7 +378,8 @@ export default function RahazaMaterialIssueModule({ token, onNavigate }) {
     try {
       const r = await fetch('/api/rahaza/material-issues', {
         method: 'POST', headers,
-        body: JSON.stringify({ items, notes: createNotes }),
+        body: JSON.stringify({ items, notes: createNotes,
+          ...docNumberPayload(numPolicy, 'mi_number', miNumber) }),
       });
       if (!r.ok) { setCreateErr(await readErr(r, `Gagal menyimpan (HTTP ${r.status})`)); return; }
       const mi = await r.json();
@@ -706,6 +712,16 @@ export default function RahazaMaterialIssueModule({ token, onNavigate }) {
                   data-testid="mi-manual-notes" />
               </div>
             )}
+
+            {/* SESI #19 — kolom nomor mengikuti kebijakan Otomatis/Manual owner. */}
+            <DocNumberField
+              policy={numPolicy}
+              value={miNumber}
+              onChange={setMiNumber}
+              label="Nomor Pengeluaran Material"
+              testId="mi-number"
+              className="mt-3"
+            />
 
             {createErr && (
               <div className="text-xs text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-500/10 border border-red-200 dark:border-red-500/20 rounded-md px-3 py-2"

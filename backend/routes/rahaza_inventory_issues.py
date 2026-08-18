@@ -116,7 +116,7 @@ async def create_mi_manual(request: Request):
         raise HTTPException(400, "Minimal 1 item material.")
     doc = {
         "id": _uid(),
-        "mi_number": await _gen_mi_number(db),
+        "mi_number": await _gen_mi_number(db, (body.get("mi_number") or "").strip()),
         "work_order_id": body.get("work_order_id") or None,
         "wo_number_snapshot": body.get("wo_number_snapshot") or "",
         "model_id": body.get("model_id") or None,

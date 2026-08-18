@@ -9,8 +9,8 @@
   "block_sev": [
     "HIGH"
   ],
-  "duration_s": 1.93,
-  "ts": "2026-08-17 19:40:25",
+  "duration_s": 1.91,
+  "ts": "2026-08-18 05:41:30",
   "findings": [
     {
       "sev": "INFO",

@@ -2621,7 +2621,7 @@
   {
    "file": "frontend/src/components/erp/PurchaseOrderModule.jsx",
    "name": "PurchaseOrderModule.jsx",
-   "lines": 1473,
+   "lines": 1489,
    "cards": 3,
    "grids": 5,
    "tables": 4,
@@ -3137,7 +3137,7 @@
   {
    "file": "frontend/src/components/erp/RahazaMaterialIssueModule.jsx",
    "name": "RahazaMaterialIssueModule.jsx",
-   "lines": 932,
+   "lines": 948,
    "cards": 3,
    "grids": 6,
    "tables": 3,
@@ -3805,7 +3805,7 @@
   {
    "file": "frontend/src/components/erp/WHReturnsModule.jsx",
    "name": "WHReturnsModule.jsx",
-   "lines": 918,
+   "lines": 934,
    "cards": 0,
    "grids": 13,
    "tables": 1,
@@ -4320,7 +4320,7 @@
   {
    "file": "frontend/src/components/erp/DocNumberingModule.jsx",
    "name": "DocNumberingModule.jsx",
-   "lines": 305,
+   "lines": 312,
    "cards": 7,
    "grids": 1,
    "tables": 0,
@@ -4334,7 +4334,7 @@
     "toggle": false
    },
    "via": [],
-   "fields_used": 19,
+   "fields_used": 21,
    "apis": [
     "api/admin/doc-numbering"
    ],

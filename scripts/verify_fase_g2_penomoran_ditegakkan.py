@@ -29,6 +29,8 @@ INVARIAN:
   G6  nomor unik: nomor manual yang sudah dipakai DITOLAK (409)
   G7  LAYAR memakai kebijakan: form kasbon membaca `/doc-number-policy` dan layar admin
       menyembunyikan pilihan mode untuk jenis yang belum ditegakkan
+  G9  (SESI #19) setiap jenis dokumen berlabel jelas: ditegakkan · selalu otomatis
+      (dengan ALASAN yang tampil di layar) · menunggu — tidak ada yang menggantung
   G8  (SESI #19) tiga jenis tambahan — **Surat Jalan Gudang**, **PR Pengadaan**,
       **Jurnal Umum** — ditegakkan pada DOKUMEN SUNGGUHAN: mode otomatis menolak
       nomor ketikan & nomor lahir mengikuti format owner; mode manual menolak nomor
@@ -65,8 +67,9 @@ PINJAMAN_KEY = "dewi_kasbon_requests.request_number_pinjaman"
 # lagi bisa membuktikan penolakan mode. Dipilih Nota Kredit (masih otomatis penuh).
 # Format yang dikirim pada uji G4 sengaja SAMA dengan bawaan registry supaya
 # menjalankan gate tidak mengubah perilaku penomoran apa pun.
-NOT_ENFORCED_KEY = "rahaza_credit_notes.cn_number"
-NOT_ENFORCED_FORMAT = "CN-{YYYY}{MM}{DD}-{SEQ:3}"
+NOT_ENFORCED_KEY = "rahaza_orders.order_number"          # ada formnya, MENUNGGU disambungkan
+NOT_ENFORCED_FORMAT = "ORD-{YYYY}{MM}{DD}-{SEQ:3}"
+AUTO_ONLY_KEY = "rahaza_credit_notes.cn_number"          # lahir tanpa manusia
 
 # Jalur tulis yang WAJIB memanggil issue_number untuk tiap kunci ber-policy_enforced.
 WRITE_PATHS = {
@@ -82,6 +85,10 @@ WRITE_PATHS = {
     "wh_delivery_notes.sj_number": "backend/routes/wms_delivery_notes.py",
     "dewi_procurement_requests.request_number": "backend/routes/dewi_procurement.py",
     "rahaza_journal_entries.je_number": "backend/routes/rahaza_journals.py",
+    # SESI #19 batch-2 (penomoran menyeluruh): dokumen UANG & STOK yang dibuat orang
+    "rahaza_purchase_orders.po_number": "backend/routes/rahaza_po.py",
+    "rahaza_material_issues.mi_number": "backend/routes/rahaza_inventory_shared.py",
+    "wh_returns.return_code": "backend/routes/dewi_wh_returns.py",
 }
 
 # SESI #19 — FORM yang wajib membaca kebijakan (bukan sekadar backend yang menegakkan):
@@ -94,6 +101,12 @@ FORM_PATHS = {
     "rahaza_journal_entries.je_number":
         "frontend/src/components/erp/RahazaJournalEntryModule.jsx",
     KASBON_KEY: "frontend/src/components/erp/KasbonStaffModule.jsx",
+    "rahaza_purchase_orders.po_number":
+        "frontend/src/components/erp/PurchaseOrderModule.jsx",
+    "rahaza_material_issues.mi_number":
+        "frontend/src/components/erp/RahazaMaterialIssueModule.jsx",
+    "wh_returns.return_code":
+        "frontend/src/components/erp/WHReturnsModule.jsx",
 }
 
 PASS, FAIL = [], []
@@ -214,6 +227,40 @@ def part_static():
         bad("G1", "ada jenis dokumen yang MENGAKU ditegakkan tetapi jalur tulisnya tidak",
             "; ".join(missing) or "tidak ada jenis yang ditandai")
 
+    # ── G9 (SESI #19): TIDAK ADA JENIS YANG STATUSNYA MENGGANTUNG ──────────────
+    # Sebelum ini, 38 dari 49 jenis dokumen hanya "belum ditegakkan" tanpa keterangan:
+    # pemilik tidak bisa membedakan "nanti bisa diatur" dari "memang mustahil diatur
+    # karena dokumennya lahir tanpa manusia". Setiap entri sekarang WAJIB berlabel
+    # tepat satu: `policy_enforced` · `auto_only` (+alasan) · `pending_enforce`.
+    tanpa_label, tanpa_alasan, ganda = [], [], []
+    for e in DOC_NUMBER_REGISTRY:
+        label = [k for k in ("policy_enforced", "auto_only", "pending_enforce") if e.get(k)]
+        if not label:
+            tanpa_label.append(e["key"])
+        elif len(label) > 1:
+            ganda.append(f"{e['key']} ({'+'.join(label)})")
+        if e.get("auto_only") and not str(e.get("alasan_otomatis") or "").strip():
+            tanpa_alasan.append(e["key"])
+    admin_src = (ROOT / "frontend/src/components/erp/DocNumberingModule.jsx").read_text(encoding="utf-8")
+    m9 = []
+    if tanpa_label:
+        m9.append(f"jenis tanpa keterangan status: {tanpa_label[:6]}")
+    if ganda:
+        m9.append(f"jenis berlabel ganda: {ganda[:4]}")
+    if tanpa_alasan:
+        m9.append(f"'selalu otomatis' tanpa alasan: {tanpa_alasan[:6]}")
+    if "auto_only" not in admin_src or "alasan_otomatis" not in admin_src:
+        m9.append("layar admin tidak menampilkan ALASAN jenis yang selalu otomatis")
+    if not m9:
+        _en = sum(1 for e in DOC_NUMBER_REGISTRY if e.get("policy_enforced"))
+        _ao = sum(1 for e in DOC_NUMBER_REGISTRY if e.get("auto_only"))
+        _pe = sum(1 for e in DOC_NUMBER_REGISTRY if e.get("pending_enforce"))
+        ok("G9", f"{len(DOC_NUMBER_REGISTRY)} jenis dokumen semuanya terklasifikasi & "
+                 "layar menyebut alasannya",
+           f"ditegakkan {_en} · selalu otomatis {_ao} (berlasan) · menunggu {_pe}")
+    else:
+        bad("G9", "status penomoran sebagian jenis masih menggantung", "; ".join(m9))
+
     form = (ROOT / "frontend/src/components/erp/KasbonStaffModule.jsx").read_text(encoding="utf-8")
     admin = (ROOT / "frontend/src/components/erp/DocNumberingModule.jsx").read_text(encoding="utf-8")
     shared = ROOT / "frontend/src/components/erp/docnum/DocNumberField.jsx"
@@ -309,14 +356,21 @@ def part_runtime(token, db):
                        {"key": NOT_ENFORCED_KEY,
                         "format": NOT_ENFORCED_FORMAT, "active": True})
     cfg = db.doc_number_configs.find_one({"key": NOT_ENFORCED_KEY}, {"_id": 0}) or {}
+    # SESI #19 — DUA jenis penolakan diuji terpisah supaya pesannya tidak boleh
+    # tertukar: yang MENUNGGU disambungkan vs yang SELALU otomatis (lahir tanpa
+    # manusia). Pesan seragam membuat pemilik menunggu sesuatu yang tidak akan datang.
+    st_ao, d_ao = call("PUT", "/api/admin/doc-numbering", token,
+                       {"key": AUTO_ONLY_KEY, "mode": "manual", "active": True})
     if (st_mode == 400 and st_m == 400 and "belum bisa diubah" in det(d_m).lower()
-            and st_fmt == 200 and cfg.get("mode") in (None, "auto")):
-        ok("G4", "jenis yang belum ditegakkan MENOLAK perubahan mode (setelan tidak berbohong), "
-                 "format tetap boleh diubah",
-           f"mode HTTP {st_m} · format HTTP {st_fmt} · tersimpan mode={cfg.get('mode')}")
+            and st_fmt == 200 and cfg.get("mode") in (None, "auto")
+            and st_ao == 400 and "selalu bernomor otomatis" in det(d_ao).lower()):
+        ok("G4", "penolakan mode JUJUR & terpisah: 'menunggu disambungkan' vs 'selalu "
+                 "otomatis (beralasan)'; FORMAT tetap boleh diubah",
+           f"menunggu HTTP {st_m} · selalu-otomatis HTTP {st_ao} · format HTTP {st_fmt}")
     else:
-        bad("G4", "setelan mode diterima untuk jenis yang tidak menegakkannya ⇒ setelan berbohong",
-            f"mode HTTP {st_m} {det(d_m)[:110]} · format HTTP {st_fmt} · mode tersimpan={cfg.get('mode')}")
+        bad("G4", "setelan mode diterima / pesannya tidak jujur",
+            f"menunggu {st_m} {det(d_m)[:80]} · selalu-otomatis {st_ao} {det(d_ao)[:80]} "
+            f"· format {st_fmt} · mode tersimpan={cfg.get('mode')}")
 
 
 def part_runtime_baru(token, db):

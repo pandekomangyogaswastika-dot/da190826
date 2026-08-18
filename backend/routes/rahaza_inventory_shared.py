@@ -137,11 +137,23 @@ async def _log_movement(db, user, **fields):
 
 # ── MI helpers ────────────────────────────────────────────────────────────────────────
 
-async def _gen_mi_number(db):
-    # RC-5 fix: atomic race-safe numbering (was count_documents()+1)
+MI_DOCNUM_KEY = "rahaza_material_issues.mi_number"
+
+
+async def _gen_mi_number(db, requested: str = "", *, sistem: bool = False):
+    """Nomor Pengeluaran Material — SATU PINTU kebijakan penomoran (SESI #19).
+
+    `sistem=True` untuk MI yang LAHIR OTOMATIS dari alur produksi internal (tidak ada
+    orang yang mengetik nomornya); jalur itu tetap otomatis meski mode disetel MANUAL.
+    """
     from utils.counters import gen_prefixed_number
-    today = date.today().strftime("%Y%m%d")
-    return await gen_prefixed_number(db, "rahaza_material_issues", "mi_number", f"MI-{today}-", 3)
+    from utils.waktu import now_wib
+    if sistem:
+        today = now_wib().strftime("%Y%m%d")
+        return await gen_prefixed_number(db, "rahaza_material_issues", "mi_number",
+                                         f"MI-{today}-", 3, config_key=MI_DOCNUM_KEY)
+    from core.doc_number_policy import issue_number
+    return await issue_number(db, MI_DOCNUM_KEY, requested=requested)
 
 
 MI_SOURCE_LABELS = {

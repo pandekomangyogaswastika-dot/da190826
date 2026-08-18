@@ -310,7 +310,7 @@ async def create_mi_draft_from_job(db, job: dict, user: dict, default_loc=None):
 
     doc = {
         'id': _uid(),
-        'mi_number': await _gen_mi_number(db),
+        'mi_number': await _gen_mi_number(db, sistem=True),  # lahir dari alur produksi
         'work_order_id': None,
         'wo_number_snapshot': '',
         'job_id': job['id'],

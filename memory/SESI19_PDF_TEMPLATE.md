@@ -108,3 +108,46 @@ Cacat yang ditemukan penjaga sendiri saat ditulis (dan sudah diperbaiki):
   kini membaca template baru — jangan menambah tulisan baru ke dua koleksi lama.
 - Setelah mengubah `frontend/src/**` WAJIB `bash scripts/rebuild_frontend.sh`
   (tidak ada hot reload).
+
+
+## LANJUTAN SESI #19 — PENOMORAN MENYELURUH (batch-2)
+
+**Masalah yang diukur:** dari 49 jenis dokumen, 38 hanya berlabel "belum ditegakkan"
+tanpa keterangan. Pemilik tidak bisa membedakan "nanti bisa diatur" dari "memang
+mustahil diatur karena dokumennya lahir tanpa manusia" — jadi layarnya menyuruh
+menunggu sesuatu yang tidak akan pernah datang.
+
+**Yang dikerjakan:**
+1. **Klasifikasi 49/49 (tidak ada lagi yang menggantung).** Setiap entri registry kini
+   berlabel TEPAT SATU:
+   - `policy_enforced` → **14 jenis** bisa diatur Otomatis/Manual;
+   - `auto_only` + `alasan_otomatis` → **18 jenis** yang LAHIR TANPA MANUSIA (mis.
+     penerimaan barang dari PO, hutang dari GR, nota kredit dari retur, sesi opname,
+     dispatch CMT, kode master/SKU) — layar menyebut alasannya apa adanya;
+   - `pending_enforce` → **17 jenis** yang punya form dan memang belum disambungkan.
+2. **Batch-2 ditegakkan (dokumen UANG & STOK yang diketik orang):**
+   | Jenis | Jalur tulis | Form |
+   |---|---|---|
+   | Purchase Order (PO Pembelian) | `routes/rahaza_po.py` | `PurchaseOrderModule.jsx` |
+   | Pengeluaran Material (MI) | `routes/rahaza_inventory_shared.py` | `RahazaMaterialIssueModule.jsx` |
+   | Retur Gudang | `routes/dewi_wh_returns.py` | `WHReturnsModule.jsx` |
+   Jalur yang lahir otomatis di dua jenis pertama (PO massal per vendor, MI dari alur
+   produksi internal) memakai parameter `sistem=True` dan tetap otomatis — dicatat di
+   docstring & registry, bukan disembunyikan.
+3. **Pesan penolakan dibedakan** (`routes/doc_numbering.py`): "SELALU bernomor otomatis
+   — <alasan>" vs "belum bisa diubah: jalur tulisnya belum disambungkan".
+4. **Gate INV-F25 naik ke 9 invarian**: G9 baru menahan jenis yang statusnya
+   menggantung / berlabel ganda / "selalu otomatis" tanpa alasan, dan menuntut layar
+   admin menampilkan alasannya. G4 kini menguji DUA jenis penolakan terpisah supaya
+   pesannya tidak boleh tertukar.
+
+**Bukti:** `verify_fase_g2_penomoran_ditegakkan.py` HIJAU 9 invarian · Retur Gudang
+diuji langsung (auto menolak nomor ketikan; manual menolak pola bebas, menerima
+`WH-RET-99001`) · `bash scripts/gate.sh` **VERDICT HIJAU 44/44**.
+
+**Sisa untuk sesi berikutnya (17 jenis `pending_enforce`)**, urutan saran: Permintaan
+Beli Aksesoris · Order Penjualan · Transfer Bank · PO Maklon · Aset Tetap · Pinjaman
+Karyawan · Klaim Biaya · Perjalanan Dinas (2) · Permak · Retur Material Produksi ·
+Permintaan Komponen · Sampel Maklon · Aset Inventaris · Permintaan Aksesoris ·
+Permintaan Kreator · Pengeluaran Barang Jadi. Polanya sudah 4 langkah baku
+(registry → `issue_number` → `<DocNumberField>` → daftarkan di WRITE_PATHS/FORM_PATHS).

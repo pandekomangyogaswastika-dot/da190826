@@ -235,11 +235,18 @@ export default function DocNumberingModule({ token }) {
                         <>
                           <span className="inline-flex items-center gap-1 px-2 py-1 rounded-lg border border-amber-300 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-500/10 text-[11px] font-semibold text-amber-800 dark:text-amber-200"
                             data-testid={`docnum-mode-locked-${item.key}`}>
-                            Otomatis saja
+                            {item.auto_only ? 'Selalu otomatis' : 'Otomatis saja'}
                           </span>
                           <p className="text-[11px] text-muted-foreground" data-testid={`docnum-mode-hint-${item.key}`}>
-                            Jalur dokumen ini <b>belum menegakkan</b> mode manual, jadi pilihannya
-                            belum ditampilkan agar setelan tidak berbohong. Formatnya tetap berlaku.
+                            {item.auto_only ? (
+                              /* SESI #19 — dokumen yang LAHIR TANPA MANUSIA: sebutkan
+                                 alasannya apa adanya, jangan menjanjikan "nanti bisa". */
+                              <>{item.alasan_otomatis || 'Dokumen ini dibuat sistem, bukan diketik.'}{' '}
+                                Formatnya tetap bisa diubah di sini.</>
+                            ) : (
+                              <>Jalur dokumen ini <b>belum menegakkan</b> mode manual, jadi pilihannya
+                                belum ditampilkan agar setelan tidak berbohong. Formatnya tetap berlaku.</>
+                            )}
                           </p>
                         </>
                       )}

@@ -129,10 +129,15 @@ async def save_format(request: Request, data: FormatIn):
     # jalan keluarnya, bukan diterima diam-diam.
     if (data.mode is not None and data.mode != (entry.get("default_mode") or "auto")
             and not entry.get("policy_enforced")):
-        # SESI #19 — daftar jenis yang SUDAH ditegakkan dibaca langsung dari registry.
-        # Dulu ditulis tangan di dalam pesan ini, jadi setiap jenis baru yang ditegakkan
-        # membuat pesannya BASI (menyebut 8 jenis padahal sudah 11) — dan pesan yang
-        # salah menyesatkan orang yang sedang mencari jalan keluar.
+        # SESI #19 — pesan dibedakan supaya JUJUR, bukan seragam "belum bisa diubah":
+        #  · auto_only        → dokumennya LAHIR TANPA MANUSIA, jadi mode manual tidak
+        #                       akan pernah berarti (alasannya disebutkan apa adanya)
+        #  · pending_enforce  → ada formnya, jalur tulisnya memang belum disambungkan
+        if entry.get("auto_only"):
+            raise HTTPException(400, (
+                f"'{entry['label']}' SELALU bernomor otomatis. "
+                f"{entry.get('alasan_otomatis', '')} "
+                "FORMAT nomornya tetap bisa diubah di sini."))
         sudah = ", ".join(e["label"] for e in DOC_NUMBER_REGISTRY if e.get("policy_enforced"))
         raise HTTPException(400, (
             f"Mode penomoran untuk '{entry['label']}' belum bisa diubah: jalur dokumennya "

@@ -50,9 +50,11 @@ STATUS_FLOW    = ["Pending", "Received", "Inspected", "Resolved", "Cancelled"]
 CHANNELS = ["Shopee", "Tokopedia", "TikTok Shop", "Lazada", "Instagram", "WhatsApp", "Lainnya"]
 
 
-async def _next_code(db) -> str:
+async def _next_code(db, requested: str = "") -> str:
     # RC-5 fix: atomic race-safe numbering (was count_documents()+1)
-    return await gen_prefixed_number(db, "wh_returns", "return_code", "WH-RET-", 5)
+    """SESI #19 — SATU PINTU kebijakan penomoran (Otomatis/Manual)."""
+    from core.doc_number_policy import issue_number
+    return await issue_number(db, "wh_returns.return_code", requested=requested)
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -125,7 +127,7 @@ async def create_return(request: Request):
     if not body.get("order_number") and not body.get("resi_number"):
         raise HTTPException(400, "order_number atau resi_number wajib diisi")
 
-    code = await _next_code(db)
+    code = await _next_code(db, (body.get("return_code") or "").strip())
     doc = {
         "id": _id(),
         "return_code": code,
