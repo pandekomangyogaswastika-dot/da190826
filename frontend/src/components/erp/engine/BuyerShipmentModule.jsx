@@ -1,5 +1,5 @@
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import SmartNativeSelect from '@/components/ui/smart-native-select';
 import { Plus, Eye, Trash2, Package, CheckCircle, Clock, TruckIcon, Download, ChevronDown, ChevronRight, History, ClipboardCheck, ClipboardList, BarChart3, ListChecks } from 'lucide-react';
 import { toast } from 'sonner';
@@ -112,11 +112,11 @@ export default function BuyerShipmentModule({ userRole, hasPerm = () => false, p
     setLoading(false);
   };
 
-  const loadPOItems = async (poId) => {
+  const loadPOItems = async (poId, poOverride = null) => {
     if (!poId) { setPoItems([]); setSelectedPO(null); setForm(f => ({...f, po_id: '', items: [], source_receipt_ids: []})); setAvailableReceipts([]); resetCapacity(); return; }
     try {
       const data = await apiGet(`/po-items?po_id=${poId}`);
-      const po = pos.find(p => p.id === poId);
+      const po = poOverride || pos.find(p => p.id === poId);
       setSelectedPO(po);
       setPoItems(Array.isArray(data) ? data : []);
       const items = (Array.isArray(data) ? data : []).map(pi => ({
@@ -302,7 +302,8 @@ export default function BuyerShipmentModule({ userRole, hasPerm = () => false, p
         const map = await fetchCapacity(srcIds);
         setForm(f => ({ ...f, items: rowsFromCapacity(map) }));
       } else {
-        await loadPOItems(poIds[0] || '');
+        const po = await ensurePOInList(poIds[0] || '');
+        await loadPOItems(poIds[0] || '', po);
         setForm(f => ({ ...f, shipment_number: row.shipment_number || '', source_receipt_ids: srcIds }));
         const map = await fetchCapacity(srcIds);
         setForm(f => ({ ...f, items: annotateItemsWithCapacity(f.items, map) }));
@@ -346,8 +347,63 @@ export default function BuyerShipmentModule({ userRole, hasPerm = () => false, p
     } finally { setOutLoading(false); }
   };
 
-  const exportOutstandingCSV = () => {
-    const rows = outstanding.items || [];
+  // ═══════════════════════════════════════════════════════════════════════════
+  // PAPAN SISA KIRIM PER PO (keluhan pemilik 2026-06)
+  // ═══════════════════════════════════════════════════════════════════════════
+  // Daftar kekurangan kirim tampil PER ITEM, jadi untuk tahu "PO ini masih berapa"
+  // pemakai harus menjumlahkan sendiri lalu mencari surat jalannya di tab lain.
+  // Papan ini menggabungkan baris yang SAMA SUMBERNYA (tidak ada rumus baru:
+  // angkanya tetap dari `/api/buyer-dispatch-outstanding`) dan menempelkan jalan
+  // keluarnya: lanjutkan surat jalan yang belum 100%, atau buat yang pertama.
+  const poBoard = useMemo(() => {
+    const map = new Map();
+    for (const r of (outstanding.items || [])) {
+      const key = r.po_id || r.po_number || '-';
+      const g = map.get(key) || {
+        key, po_id: r.po_id, po_number: r.po_number || '-', buyer: r.buyer || '',
+        ordered: 0, dispatched: 0, shippable: 0, remaining: 0, lines: 0,
+      };
+      g.ordered += Number(r.ordered || 0);
+      g.dispatched += Number(r.dispatched || 0);
+      g.shippable += Number(r.shippable || 0);
+      g.remaining += Number(r.remaining_vs_order || 0);
+      g.lines += 1;
+      if (!g.buyer && r.buyer) g.buyer = r.buyer;
+      map.set(key, g);
+    }
+    return Array.from(map.values()).map(g => ({
+      ...g,
+      pct: g.ordered > 0 ? Math.min(100, Math.round((g.dispatched / g.ordered) * 100)) : 0,
+      openShip: shipments.find(s => {
+        const ids = (s.po_ids?.length ? s.po_ids : [s.po_id]).filter(Boolean);
+        return ids.includes(g.po_id) && (s.progress_pct || 0) < 100;
+      }) || null,
+    })).sort((a, b) => b.shippable - a.shippable || b.remaining - a.remaining);
+  }, [outstanding.items, shipments]);
+
+  // Papan sisa kirim memakai kapasitas kirim (tidak peduli status PO), sedangkan
+  // pilihan PO di form hanya memuat status tertentu (In Production/Completed/
+  // Distributed). Kalau PO dari papan tidak ada di daftar itu, labelnya kosong dan
+  // pemakai tidak tahu PO mana yang sedang diisi — jadi PO-nya disisipkan.
+  const ensurePOInList = async (poId) => {
+    if (!poId) return null;
+    const found = pos.find(p => p.id === poId);
+    if (found) return found;
+    try {
+      const po = await apiGet(`/production-pos/${poId}`);
+      if (po?.id) { setPOs(prev => [po, ...prev]); return po; }
+    } catch { /* item tetap dimuat; hanya label PO yang kosong */ }
+    return null;
+  };
+
+  const openCreateForPO = async (poId) => {
+    openCreateModal();
+    if (!poId) return;
+    const po = await ensurePOInList(poId);
+    await loadPOItems(poId, po);
+  };
+
+  const exportOutstandingCSV = () => {    const rows = outstanding.items || [];
     if (rows.length === 0) { toast.error('Tidak ada data untuk diunduh'); return; }
     const head = ['No. PO', 'Buyer', 'SKU', 'Produk', 'Size', 'Warna', 'Qty Order',
       'Lolos QC', 'Hasil Permak', 'Sudah Dikirim', 'Sisa Order', 'Sisa Bisa Kirim', 'Stok FG'];
@@ -951,14 +1007,90 @@ export default function BuyerShipmentModule({ userRole, hasPerm = () => false, p
             )}
           </div>
 
+          {/* ── PAPAN SISA KIRIM PER PO ─────────────────────────────────────── */}
+          {!outLoading && poBoard.length > 0 && (
+            <div className="rounded-xl border border-blue-200 bg-blue-50/40 overflow-hidden"
+              data-testid="outstanding-po-board">
+              <div className="px-4 py-2.5 flex items-center justify-between gap-3 flex-wrap border-b border-blue-200 bg-blue-50">
+                <h3 className="text-sm font-semibold text-blue-900 flex items-center gap-1.5">
+                  <ListChecks className="w-4 h-4" /> Papan Sisa Kirim per PO
+                  <span className="px-1.5 py-0.5 rounded-full bg-blue-600 text-white text-[10px] font-bold">{poBoard.length}</span>
+                </h3>
+                <p className="text-[11px] text-blue-800/80">
+                  Satu baris = satu PO. Tombol dispatch <strong>melanjutkan surat jalan yang belum 100%</strong>
+                  {' '}(nomor tidak berubah); kalau PO belum punya surat jalan, form terbuka dengan PO itu terpilih.
+                </p>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm" data-testid="po-board-table">
+                  <thead className="bg-card/60">
+                    <tr>
+                      <th className="text-left px-3 py-2 text-xs text-muted-foreground">No. PO</th>
+                      <th className="text-left px-3 py-2 text-xs text-muted-foreground">Buyer</th>
+                      <th className="text-right px-3 py-2 text-xs text-muted-foreground">Order</th>
+                      <th className="text-right px-3 py-2 text-xs text-muted-foreground">Sudah Dikirim</th>
+                      <th className="text-left px-3 py-2 text-xs text-muted-foreground w-40">Progres</th>
+                      <th className="text-right px-3 py-2 text-xs text-muted-foreground">Sisa Order</th>
+                      <th className="text-right px-3 py-2 text-xs text-muted-foreground">Sisa Bisa Kirim</th>
+                      <th className="text-left px-3 py-2 text-xs text-muted-foreground">Surat Jalan Berjalan</th>
+                      <th className="text-right px-3 py-2 text-xs text-muted-foreground">Aksi</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {poBoard.map(g => (
+                      <tr key={g.key} className="border-t border-blue-100 bg-card/40 hover:bg-card/80 transition-colors"
+                        data-testid={`po-board-row-${g.po_number}`}>
+                        <td className="px-3 py-2 font-mono text-xs text-blue-700 font-semibold">{g.po_number}</td>
+                        <td className="px-3 py-2 text-foreground/90">{g.buyer || '-'}</td>
+                        <td className="px-3 py-2 text-right text-muted-foreground">{fmtNum(g.ordered)}</td>
+                        <td className="px-3 py-2 text-right text-amber-700">{fmtNum(g.dispatched)}</td>
+                        <td className="px-3 py-2">
+                          <div className="flex items-center gap-2">
+                            <div className="flex-1 h-1.5 rounded-full bg-border overflow-hidden">
+                              <div className="h-full bg-blue-600 rounded-full" style={{ width: `${g.pct}%` }} />
+                            </div>
+                            <span className="text-[11px] text-muted-foreground w-9 text-right">{g.pct}%</span>
+                          </div>
+                        </td>
+                        <td className="px-3 py-2 text-right font-semibold text-foreground">{fmtNum(g.remaining)}</td>
+                        <td className="px-3 py-2 text-right">
+                          {g.shippable > 0
+                            ? <span className="font-bold text-emerald-700" data-testid={`po-board-shippable-${g.po_number}`}>{fmtNum(g.shippable)}</span>
+                            : <span className="text-xs text-muted-foreground">belum ada barang</span>}
+                        </td>
+                        <td className="px-3 py-2 font-mono text-xs">
+                          {g.openShip
+                            ? <span className="text-blue-700">{g.openShip.shipment_number} <span className="text-muted-foreground">({g.openShip.progress_pct || 0}%)</span></span>
+                            : <span className="text-muted-foreground/70">belum ada</span>}
+                        </td>
+                        <td className="px-3 py-2 text-right">
+                          {canEdit && (
+                            <button type="button" disabled={g.shippable <= 0}
+                              onClick={() => (g.openShip ? openContinueModal(g.openShip) : openCreateForPO(g.po_id))}
+                              data-testid={`board-dispatch-${g.po_number}`}
+                              title={g.shippable > 0
+                                ? (g.openShip ? `Tambah dispatch ke ${g.openShip.shipment_number}` : 'Buat surat jalan pertama untuk PO ini')
+                                : 'Barang belum diterima dari CMT'}
+                              className="px-2.5 py-1 rounded-lg bg-blue-600 text-white text-[11px] font-semibold hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed inline-flex items-center gap-1 whitespace-nowrap">
+                              <Plus className="w-3 h-3" /> {g.openShip ? 'Lanjut Dispatch' : 'Dispatch Baru'}
+                            </button>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
           {outLoading ? (
             <div className="space-y-2">
               {Array.from({ length: 4 }).map((_, i) => (
                 <div key={i} className="h-11 rounded-lg bg-muted animate-pulse" />
               ))}
             </div>
-          ) : (outstanding.items || []).length === 0 ? (
-            <div className="rounded-xl border border-border bg-card py-12 text-center" data-testid="outstanding-empty">
+          ) : (outstanding.items || []).length === 0 ? (            <div className="rounded-xl border border-border bg-card py-12 text-center" data-testid="outstanding-empty">
               <CheckCircle className="w-10 h-10 mx-auto mb-3 text-emerald-600 opacity-60" />
               <p className="text-sm text-foreground/80 font-medium">Tidak ada kekurangan kirim.</p>
               <p className="text-xs text-muted-foreground mt-1">Semua item sudah terkirim penuh ke buyer.</p>

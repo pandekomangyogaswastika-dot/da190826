@@ -1072,3 +1072,19 @@ Aturan tetap yang lahir dari sesi ini (jangan dilanggar tanpa keputusan owner ba
   daftar aksesoris PO, supaya form inspeksi vendor tidak memunculkan aksesoris yang tak pernah
   dikirim dan tidak melahirkan permintaan aksesoris palsu.
 - Dijaga gate **INV-F27** (`scripts/verify_permak_dispatch_aksesoris.py`).
+
+## Monitoring CMT — aturan yang DIPUTUSKAN PEMILIK (2026-06-18, sesi #21)
+- **Potongan ke CMT = SESUAI ORDER.** Hanya kiriman NORMAL yang dihitung. Kiriman PENGGANTI/TAMBAHAN
+  (surat jalan anak) TIDAK boleh menambah potongan karena ia bukan bagian dari order — tetapi juga
+  tidak boleh disembunyikan: dilaporkan terpisah (`qty_sent_extra` + rincian per jenis).
+- **Belum dikirim ke CMT** = Σ(qty order − terkirim NORMAL) pada sudut pandang aktif; PO **Draft**
+  otomatis terhitung penuh (potongannya masih di gudang) dan ditampilkan sebagai sub-angka.
+- **Sudah dikirim ke buyer** dibaca dari SSOT `core/dispatch_capacity` — sama dengan pagar dispatch,
+  supaya angka kartu tidak pernah bisa berbeda dari yang diizinkan sistem saat mengirim.
+- **PO berjalan** = Draft · Confirmed · Distributed · In Production. PO Completed/Closed/Cancelled
+  dibuang dari sudut pandang default; pemakai bisa pindah ke "Semua PO" lewat chip.
+- **Papan Sisa Kirim** = satu baris per PO yang masih punya sisa, dengan jalan keluarnya langsung:
+  lanjutkan surat jalan yang belum 100% (nomor tetap) atau buat yang pertama.
+- **Rantai pengganti wajib terlacak**: permintaan → SJ pengganti → diterima vendor → diinspeksi,
+  terlihat di layar vendor MAUPUN admin, dan dua arah (SJ anak menunjuk permintaannya).
+- Dijaga gate **INV-F28** (`scripts/verify_monitoring_cmt_potongan.py`).

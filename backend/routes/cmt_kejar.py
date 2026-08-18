@@ -26,19 +26,23 @@ async def get_kejar(
     request: Request,
     bucket: Optional[str] = Query(None, description="telat|jatuh_tempo|mendekati|on_track|aman|tanpa_deadline"),
     include_closed: bool = False,
+    scope: Optional[str] = Query(None, description="running (default, PO berjalan) | all"),
 ):
     user = await require_auth(request)
     _require_admin(user)
     db = get_db()
-    return await list_kejar(db, bucket=bucket, only_open=not include_closed)
+    return await list_kejar(db, bucket=bucket, only_open=not include_closed, scope=scope)
 
 
 @router.get("/dashboard")
-async def get_owner_dashboard(request: Request):
+async def get_owner_dashboard(
+    request: Request,
+    scope: Optional[str] = Query(None, description="running (default, PO berjalan) | all"),
+):
     user = await require_auth(request)
     _require_admin(user)
     db = get_db()
-    return await owner_dashboard(db)
+    return await owner_dashboard(db, scope=scope)
 
 
 @router.get("/po/{po_id}")

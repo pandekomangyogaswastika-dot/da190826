@@ -1,5 +1,19 @@
 # ROADMAP — CV. Dewi Aditya ERP
 
+## Monitoring CMT & dispatch — **SELESAI 2026-06-18 (sesi #21)**
+- ✅ "Potongan ke CMT" hanya menghitung kiriman **NORMAL** (sesuai order); kiriman pengganti/tambahan
+  dilaporkan terpisah ⇒ "Sisa di CMT" tidak lagi memunculkan sisa hantu.
+- ✅ Kartu baru **Belum Dikirim ke CMT** (Σ order − terkirim, sub "dari PO Draft") dan
+  **Sudah Dikirim ke Buyer** (SSOT dispatch, sub "sisa bisa kirim").
+- ✅ Chip **PO Berjalan ↔ Semua PO** (`?scope=running|all`) — PO Completed tidak lagi menggelembungkan
+  angka yang sedang berjalan.
+- ✅ **Papan Sisa Kirim per PO** + tombol lanjut/buat dispatch (tab Kekurangan Kirim).
+- ✅ **Rantai PENGGANTI terlacak** dua arah (pelacak 5 tahap di layar vendor & admin,
+  `child_qty_total` di SJ induk, `material_request_number` di SJ anak).
+- Gate: **INV-F28** (`scripts/verify_monitoring_cmt_potongan.py`, 9 invarian).
+- Sisa (P2): pelacak belum menampilkan **hasil** inspeksi SJ pengganti (berapa pcs lolos/cacat),
+  baru status "sudah diinspeksi".
+
 ## Produksi & Maklon — **5 CACAT LOGIKA DITUTUP 2026-06-18 (sesi #20)**
 - ✅ Permak dari form manual OTOMATIS tertaut baris reject ⇒ permak berhasil menambah stok FG &
   sisa bisa kirim ke buyer (dulu hasil permak mustahil dikirim).

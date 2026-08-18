@@ -10,6 +10,7 @@ import FileAttachmentPanel from './FileAttachmentPanel';
 import SearchableSelect from './SearchableSelect';
 import ImportExportPanel from './ImportExportPanel';
 import AdditionalRequestModal from './AdditionalRequestModal';
+import MaterialRequestTracker from './MaterialRequestTracker';
 import { useSortableTable, SortableHeader } from './useSortableTable';
 import { BizBadge, BizFilter, matchBiz } from './BusinessTypeBadge';
 import { apiGet, apiPost, apiPut, apiDelete, apiFetch } from '../../../lib/api';
@@ -1094,7 +1095,9 @@ function MaterialRequestList({ userRole, requestType }) {
     { key: 'status', label: 'Status', render: v => (
       <span className={`px-2 py-1 rounded-full text-xs font-medium ${STATUS_COLORS[v] || 'bg-muted text-muted-foreground'}`}>{v}</span>
     )},
-    { key: 'child_shipment_number', label: 'Child Shipment', render: v => v ? <span className="font-mono text-emerald-700 text-xs font-medium">{v}</span> : <span className="text-muted-foreground/50 text-xs">—</span> },
+    // Rantai pengganti: bukan hanya nomornya, tapi sampai mana barangnya (INV-F28)
+    { key: 'child_shipment_number', label: 'Surat Jalan Pengganti & Jejaknya',
+      render: (_v, row) => <MaterialRequestTracker req={row} /> },
     { key: 'actions', label: 'Aksi', render: (_, row) => (
       <div className="flex items-center gap-1">
         <button onClick={() => { setSelectedReq(row); setAdminNotes(row.admin_notes || ''); setShowDetail(true); }} className="p-1.5 rounded hover:bg-blue-50 text-blue-600" title="Detail" data-testid={`material-request-detail-btn-${row.id}`}><Eye className="w-4 h-4" /></button>

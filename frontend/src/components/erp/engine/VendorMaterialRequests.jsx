@@ -15,6 +15,7 @@ import {
 import { toast } from 'sonner';
 import Modal from './Modal';
 import AdditionalRequestModal from './AdditionalRequestModal';
+import MaterialRequestTracker from './MaterialRequestTracker';
 import { apiGet, apiFetch } from '../../../lib/api';
 // F15-B — kelas Tailwind tidak boleh dirakit saat berjalan; lihat lib/tone.js
 import { tone } from '@/lib/tone';
@@ -439,13 +440,8 @@ export default function VendorMaterialRequests({ user }) {
                         </span>
                       </td>
                       <td className="px-4 py-3">
-                        {row.child_shipment_number ? (
-                          <span className="font-mono text-xs text-emerald-700 font-medium">
-                            {row.child_shipment_number}
-                          </span>
-                        ) : (
-                          <span className="text-muted-foreground/50 text-xs">—</span>
-                        )}
+                        {/* Rantai pengganti terlacak sampai diinspeksi (INV-F28) */}
+                        <MaterialRequestTracker req={row} />
                       </td>
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-1">

@@ -1,3 +1,60 @@
+# [2026-06-18 #21] **MONITORING CMT: POTONGAN SESUAI ORDER** — 2 kartu baru · sudut pandang PO · Papan Sisa Kirim · rantai PENGGANTI terlacak
+
+## Cacat yang diukur lebih dulu (bukan dugaan)
+`scripts/verify_monitoring_cmt_potongan.py` dijalankan SEBELUM perbaikan dan MERAH di 8 titik:
+- **Potongan ke CMT 105 pcs untuk order 100 pcs.** `services/cmt_kejar.py` menjumlahkan SEMUA
+  `vendor_shipment_items` milik PO, jadi surat jalan **ANAK** (pengganti/tambahan hasil persetujuan
+  permintaan material) ikut ditambahkan ke potongan.
+- **"Sisa di CMT" 5 pcs HANTU** walau CMT sudah menyetor semuanya — akibat langsung dari poin di atas
+  (dikirim 105 − disetor 100).
+- **PO `Completed` ikut dihitung.** Papan hanya membuang `Closed/Cancelled/Selesai`, jadi angka
+  "yang sedang berjalan" tidak pernah bisa dilihat.
+- **Tidak ada angka "belum dikirim ke CMT" maupun "sudah dikirim ke buyer"**, padahal keduanya bisa
+  dihitung dari SSOT yang sudah dipakai layar lain.
+- **Rantai PENGGANTI tidak terlacak**: persetujuan sudah menerbitkan SJ anak `…-R1` sejak lama,
+  tetapi layar hanya melihat nomornya — tanpa kabar sudah diterima/diinspeksi atau belum.
+
+## Yang dikerjakan
+- **Potongan = kiriman NORMAL saja.** `shipment_kind()` memisahkan NORMAL vs anak (dari
+  `parent_shipment_id` ATAU `shipment_type`, dengan lapis cadangan di level item). Kiriman anak
+  **tidak dihilangkan**: `qty_sent_extra` + rinciannya tampil sebagai panel "kiriman di luar order"
+  supaya tidak ada angka yang terasa hilang. "Sisa di CMT" ikut sembuh sendiri.
+- **Dua kartu baru** (permintaan pemilik): **Belum Dikirim ke CMT** = Σ(order − terkirim NORMAL) untuk
+  PO pada sudut pandang aktif, dengan sub-baris "dari PO Draft: X pcs"; **Sudah Dikirim ke Buyer** =
+  dari SSOT `core/dispatch_capacity` (rumus yang sama dengan pagar `POST /api/buyer-shipments`,
+  bukan rumus kedua) + sub "sisa bisa kirim".
+- **Sudut pandang PO**: chip **"PO Berjalan"** (default; Draft · Confirmed · Distributed ·
+  In Production) ↔ **"Semua PO"**. Seluruh kartu + papan Kejar CMT ikut berubah
+  (`?scope=running|all` pada `/api/dewi/cmt-kejar` dan `/dashboard`).
+- **Papan Sisa Kirim per PO** di tab "Kekurangan Kirim" (menu Dispatch ke Buyer): satu baris per PO
+  (order · terkirim · progres · sisa order · sisa bisa kirim · surat jalan berjalan) + tombol yang
+  langsung **melanjutkan** surat jalan <100% atau membuka form dengan PO itu terpilih. Angkanya
+  digabung dari `/api/buyer-dispatch-outstanding` — tidak ada rumus baru.
+- **Rantai PENGGANTI terlacak dua arah**: komponen `MaterialRequestTracker` menggambar
+  Diajukan → Disetujui → **SJ pengganti (nomor)** → Diterima vendor → Diinspeksi, dipakai DI KEDUA
+  layar (portal vendor CMT & layar admin). Backend menambah `child_shipment_status`,
+  `child_received_at`, `child_inspected` pada `GET /api/material-requests`; SJ anak menunjuk balik
+  (`material_request_number`) dan SJ induk melaporkan `child_qty_total` (juga di daftar).
+- **Perbaikan ikutan**: PO berstatus `Confirmed` tidak termasuk daftar pilihan PO, jadi modal yang
+  dibuka dari papan menampilkan dropdown kosong — `ensurePOInList()` menyisipkan PO itu supaya
+  labelnya benar (`loadPOItems(poId, poOverride)`).
+
+## Bukti
+- Gate baru **`scripts/verify_monitoring_cmt_potongan.py` (INV-F28)** — 9 invarian HIJAU (dulu 8 MERAH),
+  terdaftar di `scripts/gate.sh`. Termasuk F28-4c: **kartu ringkasan = penjumlahan baris papan**
+  untuk 5 angka (anti dua rumus) dan F28-6: pintunya ADA di layar.
+- **Gate penuh**: `bash scripts/gate.sh` → **24 gate, VERDICT HIJAU**.
+- **Testing agent iterasi 75** (API + UI awal) dan **iterasi 76** (E2E dengan data nyata):
+  10/10 uji backend + 5/5 butir UI LULUS — pelacak pengganti terlihat di dua layar, chip scope
+  mengubah angka (4 PO/550 pcs berjalan → 5 PO/750 pcs semua), "dari PO Draft: 50 pcs" muncul,
+  papan → "Dispatch Baru" → "Lanjut Dispatch" berjalan pada satu nomor surat jalan.
+  **0 isu kritis, 0 isu UI, 0 isu desain.**
+- Data uji layar bisa dibuat ulang kapan saja: `python3 scripts/_seed_uji_monitoring_cmt.py`
+  (bersihkan dengan `--clean`).
+
+
+---
+
 # [2026-06-18 #20] **LIMA CACAT PRODUKSI/MAKLON DITUTUP** — permak menaikkan sisa kirim · dispatch lanjutan · aksesoris BOM di form PO · vendor CMT bisa minta PENGGANTI
 
 ## Temuan pembuka sesi: dua perbaikan layar sebenarnya BELUM PERNAH DITULIS

@@ -58,6 +58,33 @@ async def get_material_requests(request: Request):
     docs = await db.material_requests.find(query, {'_id': 0}).sort(sort).skip(skip if wants else 0).limit(limit).to_list(limit)
     for d in docs:
         d['allowed_next'] = ['Approved', 'Rejected'] if d.get('status') == 'Pending' else []
+    # ── PELACAKAN RANTAI PENGGANTI (keluhan pemilik 2026-06, INV-F28) ──────────
+    # Persetujuan sudah menerbitkan surat jalan anak sejak lama, tetapi layar
+    # hanya melihat nomornya — tidak ada kabar apakah surat jalan itu sudah
+    # diterima vendor atau sudah diinspeksi, sehingga permintaan pengganti
+    # "hilang" setelah disetujui. Status anak + jejak inspeksinya diambil batch
+    # (2 query) supaya layar bisa menggambar pelacaknya.
+    child_ids = [d.get('child_shipment_id') for d in docs if d.get('child_shipment_id')]
+    if child_ids:
+        ships = {s['id']: s for s in await db.vendor_shipments.find(
+            {'id': {'$in': child_ids}},
+            {'_id': 0, 'id': 1, 'status': 1, 'received_at': 1, 'shipment_number': 1}
+        ).to_list(None)}
+        insp_by_ship = {i['shipment_id']: i for i in await db.vendor_material_inspections.find(
+            {'shipment_id': {'$in': child_ids}},
+            {'_id': 0, 'id': 1, 'shipment_id': 1, 'created_at': 1}
+        ).to_list(None)}
+        for d in docs:
+            cid = d.get('child_shipment_id')
+            if not cid:
+                continue
+            cs = ships.get(cid) or {}
+            insp = insp_by_ship.get(cid) or {}
+            d['child_shipment_status'] = cs.get('status') or 'Missing'
+            d['child_received_at'] = cs.get('received_at')
+            d['child_inspection_id'] = insp.get('id') or ''
+            d['child_inspected'] = bool(insp.get('id'))
+            d['child_inspected_at'] = insp.get('created_at')
     if wants:
         return _paginated_envelope(serialize_doc(docs), total, page, per_page)
     return serialize_doc(docs)

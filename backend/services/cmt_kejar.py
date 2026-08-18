@@ -9,9 +9,28 @@ TIDAK menulis koleksi apa pun. TIDAK membaca vendor_jobs/wh_cmt_dispatches (hind
 Konsep:
 - Target CMT (M4) = delivery_deadline − buffer_days (config maklon_cmt_buffer_days). Fallback: deadline internal.
 - Bucket keterlambatan (S3): aman | on_track | mendekati | jatuh_tempo | telat(H+late_grace) | tanpa_deadline.
-- Sisa di CMT (M5) = Σqty_sent(vendor_shipment_items) − Σqty_returned(cmt_receipt_lines approved).
+- Sisa di CMT (M5) = Σqty_sent(kiriman NORMAL) − Σqty_returned(cmt_receipt_lines approved).
 - Kali setor (M5) = jumlah cmt_receipts Approved untuk PO.
 - Ongkos jahit terhitung (M2) = Σ(cmt_price_snapshot × qty_accepted).
+
+POTONGAN HARUS SESUAI ORDER (keluhan pemilik 2026-06, INV-F28)
+--------------------------------------------------------------
+Dulu "Potongan ke CMT" menjumlahkan SEMUA `vendor_shipment_items` milik PO tanpa
+memandang jenis surat jalannya, jadi kiriman PENGGANTI/TAMBAHAN (surat jalan ANAK
+hasil persetujuan permintaan material) ikut ditambahkan. Akibatnya potongan yang
+dilaporkan MELEBIHI qty order (mis. order 100 → tertulis 105) dan "Sisa di CMT"
+memunculkan sisa HANTU walau CMT sudah menyetor semuanya.
+Sekarang:
+  · `qty_sent_cmt`   = hanya kiriman **NORMAL** (potongan sesuai order),
+  · `qty_sent_extra` = kiriman anak (pengganti/tambahan/permak) — DILAPORKAN
+    TERPISAH, tidak dihilangkan, dengan rincian per jenis.
+Ditambah dua angka yang diminta pemilik dan dua sudut pandang PO:
+  · `qty_not_sent_cmt`  = order − terkirim NORMAL (masih di gudang; PO Draft
+    otomatis terhitung penuh karena belum mengirim apa pun),
+  · `qty_shipped_buyer` = sudah dikirim ke buyer, dari SSOT `core.dispatch_capacity`
+    (rumus yang sama dengan pagar dispatch — bukan rumus kedua),
+  · `scope=running` (default) membuang PO Completed/Closed/Cancelled;
+    `scope=all` menghitung semuanya.
 """
 from datetime import datetime, timezone, date
 from typing import Dict, List, Any, Optional
@@ -23,6 +42,43 @@ from core.cmt_receipt_status import (ST_DONE as _RC_DONE,
 _log = logging.getLogger(__name__)
 
 COMPONENT_OPEN_STATUSES = ("pending", "cutting", "ready")  # belum diterima
+
+# Status PO yang dianggap SUDAH SELESAI (tidak berjalan lagi). Ditulis huruf kecil,
+# dibandingkan case-insensitive supaya data lama ikut kena.
+PO_DONE_STATUSES = {"completed", "complete", "done", "finished", "selesai",
+                    "closed", "cancelled", "canceled", "batal", "archived"}
+PO_DRAFT_STATUSES = {"draft", "rancangan"}
+SCOPE_RUNNING, SCOPE_ALL = "running", "all"
+
+
+def _po_status(po: Dict[str, Any]) -> str:
+    return str(po.get("status") or "").strip().lower()
+
+
+def is_running_po(po: Dict[str, Any]) -> bool:
+    return _po_status(po) not in PO_DONE_STATUSES
+
+
+def is_draft_po(po: Dict[str, Any]) -> bool:
+    return _po_status(po) in PO_DRAFT_STATUSES
+
+
+def shipment_kind(ship: Dict[str, Any] | None, item: Dict[str, Any] | None = None) -> str:
+    """NORMAL vs kiriman anak (REPLACEMENT/ADDITIONAL/REWORK).
+
+    Surat jalan anak dikenali dari `parent_shipment_id` ATAU `shipment_type`; item
+    dipakai sebagai lapis kedua karena `vendor_shipment_items` juga menyimpan
+    `shipment_type`/`parent_shipment_id` (mis. saat induknya sudah dihapus).
+    """
+    s = ship or {}
+    it = item or {}
+    t = str(s.get("shipment_type") or it.get("shipment_type") or "").strip().upper()
+    has_parent = bool(s.get("parent_shipment_id") or it.get("parent_shipment_id"))
+    if t and t != "NORMAL":
+        return t
+    if has_parent:
+        return "REPLACEMENT"   # bertanda NORMAL tapi punya induk → tetap kiriman anak
+    return "NORMAL"
 
 
 def _int(v) -> int:
@@ -91,7 +147,24 @@ def _bucket(outstanding_cmt: int, target: Optional[date], today: date, late_grac
     return {"bucket": b, "overdue_days": overdue, "days_to_target": to_target}
 
 
-async def compute_po_kejar(db, po: Dict[str, Any], cfg: Dict[str, int], today: date = None) -> Dict[str, Any]:
+async def caps_for_pos(db, pos: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
+    """Peta kapasitas kirim (SSOT `core.dispatch_capacity`) untuk SEMUA item PO
+    sekaligus — supaya papan & kartu memakai rumus yang sama dengan pagar dispatch
+    tanpa memanggil ulang per PO."""
+    po_ids = [p["id"] for p in pos if p.get("id")]
+    if not po_ids:
+        return {}
+    items = await db.po_items.find({"po_id": {"$in": po_ids}}, {"_id": 0, "id": 1}).to_list(None)
+    ids = [i["id"] for i in items if i.get("id")]
+    if not ids:
+        return {}
+    from core import dispatch_capacity as dcap
+    rows = await dcap.by_po_items(db, ids)
+    return {r["key"]: r for r in rows}
+
+
+async def compute_po_kejar(db, po: Dict[str, Any], cfg: Dict[str, int], today: date = None,
+                           caps: Dict[str, Dict[str, Any]] | None = None) -> Dict[str, Any]:
     today = today or datetime.now(timezone.utc).date()
     po_id = po["id"]
     items = await db.po_items.find({"po_id": po_id}, {"_id": 0}).to_list(None)
@@ -99,23 +172,39 @@ async def compute_po_kejar(db, po: Dict[str, Any], cfg: Dict[str, int], today: d
     price_by_item = {i["id"]: float(i.get("cmt_price_snapshot", 0) or 0) for i in items}
     qty_ordered = sum(_int(i.get("qty")) for i in items)
 
-    # Sent to CMT (potongan dikirim) — vendor_shipment_items.qty_sent
+    # Potongan dikirim ke CMT — HANYA kiriman NORMAL (sesuai order). Kiriman anak
+    # (pengganti/tambahan) dijumlahkan terpisah supaya tidak ada yang hilang dari
+    # layar tetapi juga tidak menggelembungkan potongan (INV-F28).
     sent_cmt = 0
+    sent_extra = 0
+    extra_by_type: Dict[str, int] = {}
     dispatch_dates: List[date] = []
     if item_ids:
         vsi = await db.vendor_shipment_items.find(
-            {"po_item_id": {"$in": item_ids}}, {"_id": 0, "qty_sent": 1, "shipment_id": 1}
+            {"po_item_id": {"$in": item_ids}},
+            {"_id": 0, "qty_sent": 1, "shipment_id": 1, "shipment_type": 1,
+             "parent_shipment_id": 1},
         ).to_list(None)
-        sent_cmt = sum(_int(v.get("qty_sent")) for v in vsi)
         ship_ids = list({v.get("shipment_id") for v in vsi if v.get("shipment_id")})
+        ships: Dict[str, Dict[str, Any]] = {}
         if ship_ids:
-            ships = await db.vendor_shipments.find(
-                {"id": {"$in": ship_ids}}, {"_id": 0, "shipment_date": 1}
-            ).to_list(None)
-            for s in ships:
+            for s in await db.vendor_shipments.find(
+                    {"id": {"$in": ship_ids}},
+                    {"_id": 0, "id": 1, "shipment_date": 1, "shipment_type": 1,
+                     "parent_shipment_id": 1}).to_list(None):
+                ships[s["id"]] = s
+        for v in vsi:
+            s = ships.get(v.get("shipment_id")) or {}
+            q = _int(v.get("qty_sent"))
+            kind = shipment_kind(s, v)
+            if kind == "NORMAL":
+                sent_cmt += q
                 d = _to_date(s.get("shipment_date"))
                 if d:
                     dispatch_dates.append(d)
+            else:
+                sent_extra += q
+                extra_by_type[kind] = extra_by_type.get(kind, 0) + q
 
     # Returned + accepted from Approved receipts
     returned = accepted = 0
@@ -136,6 +225,17 @@ async def compute_po_kejar(db, po: Dict[str, Any], cfg: Dict[str, int], today: d
     outstanding_cmt = max(0, sent_cmt - returned)
     ongkos_jahit = round(sum(price_by_item.get(iid, 0) * q for iid, q in accepted_by_item.items()), 2)
 
+    # Sudah dikirim ke buyer + sisa bisa kirim — SSOT core.dispatch_capacity
+    # (rumus yang sama dengan pagar POST /api/buyer-shipments).
+    if caps is None:
+        caps = await caps_for_pos(db, [po])
+    shipped_buyer = shippable_buyer = 0
+    for iid in item_ids:
+        cap = caps.get(f"poi:{iid}") or {}
+        shipped_buyer += _int(cap.get("dispatched"))
+        shippable_buyer += _int(cap.get("shippable"))
+    not_sent_cmt = max(0, qty_ordered - sent_cmt)
+
     delivery_deadline = _to_date(po.get("delivery_deadline"))   # Deadline Mitra/Buyer
     internal_deadline = _to_date(po.get("deadline"))
     base_deadline = delivery_deadline or internal_deadline
@@ -154,7 +254,14 @@ async def compute_po_kejar(db, po: Dict[str, Any], cfg: Dict[str, int], today: d
         "customer_name": po.get("customer_name", ""),
         "status": po.get("status", ""),
         "qty_ordered": qty_ordered,
-        "qty_sent_cmt": sent_cmt,
+        "qty_sent_cmt": sent_cmt,                 # HANYA kiriman NORMAL (sesuai order)
+        "qty_sent_extra": sent_extra,             # pengganti/tambahan (terpisah)
+        "qty_sent_extra_by_type": extra_by_type,
+        "qty_not_sent_cmt": not_sent_cmt,         # masih di gudang
+        "qty_shipped_buyer": shipped_buyer,       # sudah dikirim ke buyer
+        "qty_shippable_buyer": shippable_buyer,   # sisa bisa kirim ke buyer
+        "is_draft": is_draft_po(po),
+        "is_running": is_running_po(po),
         "qty_returned": returned,
         "qty_accepted": accepted,
         "qty_outstanding_cmt": outstanding_cmt,   # sisa di CMT
@@ -169,43 +276,67 @@ async def compute_po_kejar(db, po: Dict[str, Any], cfg: Dict[str, int], today: d
     }
 
 
-async def _maklon_pos(db, only_open: bool = True) -> List[Dict[str, Any]]:
-    q = {"business_type": "maklon"}
-    if only_open:
-        q["status"] = {"$nin": ["Closed", "Cancelled", "Selesai", "closed", "cancelled"]}
-    return await db.production_pos.find(q, {"_id": 0}).sort("created_at", -1).to_list(500)
+async def _maklon_pos(db, scope: str = SCOPE_RUNNING) -> List[Dict[str, Any]]:
+    """PO maklon menurut sudut pandang yang dipilih pemakai.
+
+    `scope='running'` (default) = PO yang MASIH BERJALAN: Draft · Confirmed ·
+    Distributed · In Production. PO **Completed**/Closed/Cancelled dibuang —
+    dulu hanya `Closed/Cancelled/Selesai` yang dibuang sehingga PO yang sudah
+    selesai tetap menggelembungkan seluruh kartu (keluhan pemilik, INV-F28).
+    `scope='all'` = semua PO maklon.
+    """
+    pos = await db.production_pos.find(
+        {"business_type": "maklon"}, {"_id": 0}).sort("created_at", -1).to_list(500)
+    if scope == SCOPE_ALL:
+        return pos
+    return [p for p in pos if is_running_po(p)]
 
 
-async def list_kejar(db, bucket: Optional[str] = None, only_open: bool = True) -> Dict[str, Any]:
+def _norm_scope(scope: Optional[str]) -> str:
+    """Hanya dua kosakata: 'running' (default) dan 'all'/'semua'."""
+    return SCOPE_ALL if str(scope or "").strip().lower() in ("all", "semua") else SCOPE_RUNNING
+
+
+async def list_kejar(db, bucket: Optional[str] = None, only_open: bool = True,
+                     scope: Optional[str] = None) -> Dict[str, Any]:
+    scope = _norm_scope(scope if scope is not None else (SCOPE_RUNNING if only_open else SCOPE_ALL))
     cfg = await get_buffer_config(db)
     today = datetime.now(timezone.utc).date()
-    pos = await _maklon_pos(db, only_open)
+    pos = await _maklon_pos(db, scope)
+    caps = await caps_for_pos(db, pos)
     rows = []
     for po in pos:
-        r = await compute_po_kejar(db, po, cfg, today)
+        r = await compute_po_kejar(db, po, cfg, today, caps=caps)
         if bucket and r["bucket"] != bucket:
             continue
         rows.append(r)
     order = {"telat": 0, "jatuh_tempo": 1, "mendekati": 2, "on_track": 3, "tanpa_deadline": 4, "aman": 5}
     rows.sort(key=lambda r: (order.get(r["bucket"], 9), -(r["overdue_days"] or -999)))
-    return {"config": cfg, "count": len(rows), "rows": rows}
+    return {"config": cfg, "scope": scope, "count": len(rows), "rows": rows}
 
 
-async def owner_dashboard(db) -> Dict[str, Any]:
-    """M2 — KPI Dashboard Owner CMT (agregasi seluruh PO maklon aktif)."""
+async def owner_dashboard(db, scope: Optional[str] = None) -> Dict[str, Any]:
+    """M2 — KPI Dashboard Owner CMT (agregasi PO maklon menurut scope)."""
+    scope = _norm_scope(scope)
     cfg = await get_buffer_config(db)
     today = datetime.now(timezone.utc).date()
-    pos = await _maklon_pos(db, only_open=True)
+    pos = await _maklon_pos(db, scope)
+    caps = await caps_for_pos(db, pos)
 
     agg = {
+        "scope": scope,
         "total_po": len(pos),
+        "po_draft": 0,
         "qty_ordered": 0, "qty_sent_cmt": 0, "qty_returned": 0, "qty_accepted": 0,
         "qty_outstanding_cmt": 0, "kali_setor": 0, "ongkos_jahit_terhitung": 0.0,
+        "qty_sent_extra": 0, "qty_sent_extra_by_type": {},
+        "qty_not_sent_cmt": 0, "qty_not_sent_draft": 0,
+        "qty_shipped_buyer": 0, "qty_shippable_buyer": 0,
         "buckets": {"telat": 0, "jatuh_tempo": 0, "mendekati": 0, "on_track": 0, "aman": 0, "tanpa_deadline": 0},
         "telat_pos": [],
     }
     for po in pos:
-        r = await compute_po_kejar(db, po, cfg, today)
+        r = await compute_po_kejar(db, po, cfg, today, caps=caps)
         agg["qty_ordered"] += r["qty_ordered"]
         agg["qty_sent_cmt"] += r["qty_sent_cmt"]
         agg["qty_returned"] += r["qty_returned"]
@@ -213,6 +344,15 @@ async def owner_dashboard(db) -> Dict[str, Any]:
         agg["qty_outstanding_cmt"] += r["qty_outstanding_cmt"]
         agg["kali_setor"] += r["kali_setor"]
         agg["ongkos_jahit_terhitung"] += r["ongkos_jahit_terhitung"]
+        agg["qty_sent_extra"] += r["qty_sent_extra"]
+        for k, v in (r.get("qty_sent_extra_by_type") or {}).items():
+            agg["qty_sent_extra_by_type"][k] = agg["qty_sent_extra_by_type"].get(k, 0) + v
+        agg["qty_not_sent_cmt"] += r["qty_not_sent_cmt"]
+        agg["qty_shipped_buyer"] += r["qty_shipped_buyer"]
+        agg["qty_shippable_buyer"] += r["qty_shippable_buyer"]
+        if r.get("is_draft"):
+            agg["po_draft"] += 1
+            agg["qty_not_sent_draft"] += r["qty_not_sent_cmt"]
         agg["buckets"][r["bucket"]] = agg["buckets"].get(r["bucket"], 0) + 1
         if r["bucket"] == "telat":
             agg["telat_pos"].append({

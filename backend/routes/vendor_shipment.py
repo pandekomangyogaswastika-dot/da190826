@@ -148,18 +148,28 @@ async def get_vendor_shipments(request: Request):
     ship_ids = [s['id'] for s in shipments]
     if ship_ids:
         items_all = await db.vendor_shipment_items.find({'shipment_id': {'$in': ship_ids}}, {'_id': 0}).to_list(None)
-        # count child shipments in one aggregation
+        # count child shipments + qty pengganti dalam satu agregasi (INV-F28:
+        # daftar harus bisa memberi tahu "punya 2 kiriman pengganti, 10 pcs")
         child_agg = await db.vendor_shipments.aggregate([
             {'$match': {'parent_shipment_id': {'$in': ship_ids}}},
-            {'$group': {'_id': '$parent_shipment_id', 'n': {'$sum': 1}}},
+            {'$group': {'_id': '$parent_shipment_id', 'n': {'$sum': 1},
+                        'ids': {'$push': '$id'}}},
         ]).to_list(None)
+        child_all_ids = [cid for c in child_agg for cid in (c.get('ids') or [])]
+        child_qty_agg = await db.vendor_shipment_items.aggregate([
+            {'$match': {'shipment_id': {'$in': child_all_ids}}},
+            {'$group': {'_id': '$shipment_id', 'q': {'$sum': '$qty_sent'}}},
+        ]).to_list(None) if child_all_ids else []
+        qty_by_child = {c['_id']: int(c.get('q') or 0) for c in child_qty_agg}
     else:
-        items_all, child_agg = [], []
+        items_all, child_agg, qty_by_child = [], [], {}
 
     items_by_ship = {}
     for it in items_all:
         items_by_ship.setdefault(it['shipment_id'], []).append(it)
     child_count_by_ship = {c['_id']: c['n'] for c in child_agg}
+    child_qty_by_ship = {c['_id']: sum(qty_by_child.get(cid, 0) for cid in (c.get('ids') or []))
+                         for c in child_agg}
 
     # Collect all PO ids referenced, fetch accessory counts in one aggregation
     all_po_ids = set()
@@ -190,6 +200,7 @@ async def get_vendor_shipments(request: Request):
                         else sum(acc_count_by_po.get(pid, 0) for pid in po_ids_s))
         result.append({**serialize_doc(s), 'items': serialize_doc(items),
                        'child_shipment_count': child_ships, 'has_children': child_ships > 0,
+                       'child_qty_total': child_qty_by_ship.get(s['id'], 0),
                        'po_accessories_count': po_acc_count})
 
     if wants:
@@ -262,6 +273,24 @@ async def get_vendor_shipment(sid: str, request: Request):
     result['accessory_items'] = serialize_doc(accessory_items)
     result['child_shipments'] = child_with_items
     result['po_accessories'] = serialize_doc(po_accessories_all)
+    # ── RANTAI PENGGANTI TERLACAK DUA ARAH (INV-F28) ──────────────────────────
+    # Anak menunjuk balik ke permintaan yang melahirkannya, induk melaporkan
+    # berapa pcs yang sudah dikirim ulang. Tanpa ini surat jalan pengganti
+    # muncul di daftar tanpa penjelasan asal-usulnya.
+    result['child_qty_total'] = sum(
+        int(it.get('qty_sent') or 0) for cs in child_with_items for it in (cs.get('items') or []))
+    result['child_qty_by_type'] = {}
+    for cs in child_with_items:
+        t = (cs.get('shipment_type') or 'REPLACEMENT').upper()
+        result['child_qty_by_type'][t] = result['child_qty_by_type'].get(t, 0) + sum(
+            int(it.get('qty_sent') or 0) for it in (cs.get('items') or []))
+    if is_child and s.get('material_request_id'):
+        mr = await db.material_requests.find_one(
+            {'id': s['material_request_id']},
+            {'_id': 0, 'request_number': 1, 'request_type': 1, 'reason': 1, 'approved_by': 1})
+        result['material_request_number'] = (mr or {}).get('request_number', '')
+        result['material_request_type'] = (mr or {}).get('request_type', '')
+        result['material_request_reason'] = (mr or {}).get('reason', '')
     # Layar perlu tahu ALASANNYA kosong, bukan sekadar kosong.
     result['accessories_scope'] = 'own' if is_child else 'po'
     result['is_child_shipment'] = is_child

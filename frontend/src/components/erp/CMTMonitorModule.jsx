@@ -50,13 +50,13 @@ const BUCKET_FILTERS = [
   { key: 'aman', label: 'Aman' },
 ];
 
-function Kpi({ label, value, sub, tone = 'default', icon: Icon }) {
+function Kpi({ label, value, sub, tone = 'default', icon: Icon, testid }) {
   const tones = {
     default: 'text-foreground', red: 'text-red-600', amber: 'text-amber-600',
     emerald: 'text-emerald-600', blue: 'text-blue-600', violet: 'text-violet-600',
   };
   return (
-    <div className="rounded-xl border border-border bg-card p-4">
+    <div className="rounded-xl border border-border bg-card p-4" data-testid={testid}>
       <div className="flex items-center justify-between">
         <span className="text-xs font-medium text-muted-foreground">{label}</span>
         {Icon && <Icon size={16} className="text-muted-foreground/60" />}
@@ -82,14 +82,19 @@ export default function CMTMonitorModule() {
   const [kapasitas, setKapasitas] = useState(null);
   const [recon, setRecon] = useState(null);
   const [bucket, setBucket] = useState('');
+  // ── SUDUT PANDANG PO (keluhan pemilik 2026-06, INV-F28) ───────────────────
+  // Dulu kartu selalu menghitung PO `Completed` juga, jadi angka "berjalan" tidak
+  // pernah bisa dilihat. Sekarang pemakai memilih: PO Berjalan (default) atau
+  // Semua PO — dan SELURUH kartu + papan ikut berubah.
+  const [scope, setScope] = useState('running');
   const [loading, setLoading] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
       const [d, k, ib, cs, ba, kap, rc] = await Promise.all([
-        apiGet('/dewi/cmt-kejar/dashboard'),
-        apiGet(`/dewi/cmt-kejar${bucket ? `?bucket=${bucket}` : ''}`),
+        apiGet(`/dewi/cmt-kejar/dashboard?scope=${scope}`),
+        apiGet(`/dewi/cmt-kejar?scope=${scope}${bucket ? `&bucket=${bucket}` : ''}`),
         apiGet('/dewi/cmt-intake/batches?scope=maklon'),
         apiGet('/dewi/cmt-intake/cek-seri?scope=maklon'),
         apiGet('/dewi/cmt-belanja/rekap-aksesoris'),
@@ -108,7 +113,7 @@ export default function CMTMonitorModule() {
     } finally {
       setLoading(false);
     }
-  }, [bucket]);
+  }, [bucket, scope]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -128,6 +133,29 @@ export default function CMTMonitorModule() {
         <button onClick={load} className="inline-flex items-center gap-2 px-3 py-2 text-sm rounded-md border border-input bg-background hover:bg-muted" data-testid="btn-refresh-monitor">
           <RefreshCw size={14} /> Refresh
         </button>
+      </div>
+
+      {/* Sudut pandang PO — seluruh kartu & papan ikut berubah (INV-F28) */}
+      <div className="flex items-center gap-2 flex-wrap">
+        <span className="text-xs text-muted-foreground">Sudut pandang:</span>
+        {[
+          { key: 'running', label: 'PO Berjalan', hint: 'Draft · Confirmed · Distributed · In Production' },
+          { key: 'all', label: 'Semua PO', hint: 'termasuk Completed & Closed' },
+        ].map(s => (
+          <button key={s.key} onClick={() => setScope(s.key)} title={s.hint}
+            data-testid={`monitor-scope-${s.key}`}
+            className={`px-3 py-1 rounded-full text-xs font-semibold border transition-colors ${
+              scope === s.key
+                ? 'bg-red-600 text-white border-red-600'
+                : 'bg-background text-muted-foreground border-border hover:text-foreground'}`}>
+            {s.label}
+          </button>
+        ))}
+        <span className="text-xs text-muted-foreground/70">
+          {scope === 'running'
+            ? 'PO yang sudah Completed/Closed tidak dihitung.'
+            : 'Menghitung SEMUA PO maklon, termasuk yang sudah selesai.'}
+        </span>
       </div>
 
       {/* Tabs */}
@@ -171,19 +199,46 @@ export default function CMTMonitorModule() {
       {/* ── DASHBOARD OWNER ── */}
       {tab === 'dashboard' && dash && (
         <div className="space-y-4" data-testid="monitor-dashboard-panel">
-          <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3">
-            <Kpi label="Potongan ke CMT" value={fmt(dash.qty_sent_cmt)} sub="pcs dikirim" icon={Truck} tone="blue" />
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
+            <Kpi label="Potongan ke CMT" testid="kpi-potongan-ke-cmt" value={fmt(dash.qty_sent_cmt)}
+              sub={dash.qty_sent_extra
+                ? `pcs sesuai order · +${fmt(dash.qty_sent_extra)} pengganti/tambahan`
+                : 'pcs sesuai order (kiriman NORMAL)'}
+              icon={Truck} tone="blue" />
+            <Kpi label="Belum Dikirim ke CMT" testid="kpi-belum-ke-cmt" value={fmt(dash.qty_not_sent_cmt)}
+              sub={`masih di gudang · dari PO Draft: ${fmt(dash.qty_not_sent_draft)} pcs`}
+              icon={Boxes} tone="amber" />
             <Kpi label="Disetor (balik)" value={fmt(dash.qty_returned)} sub={`${fmt(dash.kali_setor)}x setor`} icon={PackageCheck} tone="emerald" />
             <Kpi label="Sisa di CMT" value={fmt(dash.qty_outstanding_cmt)} sub="belum disetor" icon={Boxes} tone="amber" />
+            <Kpi label="Sudah Dikirim ke Buyer" testid="kpi-ke-buyer" value={fmt(dash.qty_shipped_buyer)}
+              sub={`sisa bisa kirim: ${fmt(dash.qty_shippable_buyer)} pcs`}
+              icon={PackageCheck} tone="emerald" />
             <Kpi label="PO TELAT" value={fmt(b.telat)} sub={`${fmt(b.jatuh_tempo)} jatuh tempo`} icon={AlertTriangle} tone="red" />
             <Kpi label="Ongkos Jahit" value={fmtRp(dash.ongkos_jahit_terhitung)} sub="dari qty diterima" icon={Wallet} tone="violet" />
             <Kpi label="Komponen Kurang" value={fmt(dash.komponen_kurang_open?.requests)} sub={`${fmt(dash.komponen_kurang_open?.qty)} pcs belum diterima`} icon={AlertTriangle} tone="amber" />
             <Kpi label="Biaya Permak" value={fmtRp(dash.biaya_permak)} sub={`${fmt(dash.permak_open)} permak aktif`} icon={Wrench} tone="blue" />
+            <Kpi label="Order (Qty PO)" value={fmt(dash.qty_ordered)}
+              sub={`${fmt(dash.total_po)} PO ${dash.scope === 'all' ? '(semua)' : 'berjalan'} · ${fmt(dash.po_draft)} draft`}
+              icon={ListChecks} tone="default" />
           </div>
+
+          {/* Rincian kiriman anak — supaya tidak ada yang merasa angkanya "hilang" */}
+          {dash.qty_sent_extra > 0 && (
+            <div className="rounded-xl border border-violet-200 bg-violet-50/60 p-3 text-xs text-violet-900"
+              data-testid="monitor-extra-breakdown">
+              <strong>{fmt(dash.qty_sent_extra)} pcs</strong> kiriman di luar order (tidak ikut
+              menambah "Potongan ke CMT" supaya potongan tetap sesuai order):{' '}
+              {Object.entries(dash.qty_sent_extra_by_type || {})
+                .map(([k, v]) => `${k === 'REPLACEMENT' ? 'Pengganti' : k === 'ADDITIONAL' ? 'Tambahan' : k} ${fmt(v)} pcs`)
+                .join(' · ')}
+            </div>
+          )}
 
           {/* Distribusi bucket */}
           <div className="rounded-xl border border-border bg-card p-4">
-            <h3 className="text-sm font-semibold text-foreground mb-3">Distribusi Status Kejar ({fmt(dash.total_po)} PO aktif)</h3>
+            <h3 className="text-sm font-semibold text-foreground mb-3">
+              Distribusi Status Kejar ({fmt(dash.total_po)} PO {dash.scope === 'all' ? 'semua' : 'berjalan'})
+            </h3>
             <div className="flex flex-wrap gap-3">
               {Object.entries(BUCKET_META).map(([k, m]) => (
                 <div key={k} className="flex items-center gap-2 text-sm">

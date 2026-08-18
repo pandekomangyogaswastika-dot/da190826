@@ -551,6 +551,22 @@ if [ $AUTH_READY -eq 1 ]; then
   run_gate "STOK/DOKUMEN — Permak menaikkan sisa kirim · dispatch lanjutan · aksesoris BOM (INV-F27)" \
            "python3 scripts/verify_permak_dispatch_aksesoris.py"
 
+  # ── INV-F28 (2026-06, keluhan pemilik) — MONITORING CMT: POTONGAN SESUAI ORDER
+  # Angka di Monitoring CMT dipakai owner untuk menagih vendor, jadi kalau ia
+  # membengkak sendiri, keputusannya salah. Yang TERUKUR sebelum perbaikan:
+  #   · "Potongan ke CMT" menjumlahkan SEMUA `vendor_shipment_items` termasuk surat
+  #     jalan ANAK (pengganti/tambahan) ⇒ order 100 dilaporkan 105, dan
+  #     "Sisa di CMT" memunculkan 5 pcs HANTU walau CMT sudah menyetor semuanya;
+  #   · papan hanya membuang PO Closed/Cancelled/Selesai — PO **Completed** tetap
+  #     ikut dihitung, jadi angka "yang sedang berjalan" tidak pernah bisa dilihat;
+  #   · tidak ada angka "belum dikirim ke CMT" (masih di gudang) maupun "sudah
+  #     dikirim ke buyer", padahal keduanya ada di SSOT yang sudah dipakai layar lain;
+  #   · permintaan PENGGANTI yang disetujui menerbitkan surat jalan anak tetapi
+  #     rantainya tidak terlacak di layar (tidak ada penunjuk balik & rekap qty).
+  # Gate ini menguji lewat endpoint asli + memastikan pintunya ADA di layar.
+  run_gate "UANG/DATA — Monitoring CMT: potongan sesuai order · scope PO · lacak pengganti (INV-F28)" \
+           "python3 scripts/verify_monitoring_cmt_potongan.py"
+
 else
   for g in "state machine jurnal" "nomor dokumen kembar" "batas nilai AR/AP" \
            "RBAC/IDOR" "input jahat 4xx" "endpoint kritis" \
@@ -579,7 +595,8 @@ else
            "Arus keluar Cutting berdokumen (INV-F24)" \
            "Setelan penomoran ditegakkan (INV-F25)" \
            "Template PDF tercetak & satu pintu (INV-F26)" \
-           "Permak/dispatch lanjutan/aksesoris BOM (INV-F27)"; do
+           "Permak/dispatch lanjutan/aksesoris BOM (INV-F27)" \
+           "Monitoring CMT potongan sesuai order (INV-F28)"; do
     skip_gate "$g" "backend/auth belum siap"
   done
 fi
