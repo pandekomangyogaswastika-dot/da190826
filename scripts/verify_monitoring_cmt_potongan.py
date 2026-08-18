@@ -270,12 +270,66 @@ def cek_lacak_pengganti(db, adm, ven, parent, appr):
             f"permintaan.child_status={mr.get('child_shipment_status')}")
 
 
+def cek_keseimbangan(adm, po_no):
+    """F28-7 — 12 kartu harus bisa dipertanggungjawabkan: 5 identitas + penyebutan PO."""
+    st, rows, _ = rows_of(adm, "running")
+    row = rows.get(po_no) or {}
+    _, dsh = dash_of(adm, "running")
+    bal = dsh.get("balance") or {}
+    checks = {c.get("key"): c for c in (bal.get("checks") or [])}
+    if st != 200 or sorted(checks) != ["buyer", "cmt", "order", "qc", "reject"]:
+        bad("F28-7", "backend tidak melaporkan 5 identitas keseimbangan",
+            json.dumps(sorted(checks))[:150])
+        return
+
+    # identitas diuji pada PO uji sendiri (bebas dari data demo lama)
+    o, ns, sc_ = _iv(row.get("qty_ordered")), _iv(row.get("qty_not_sent_cmt")), _iv(row.get("qty_sent_cmt"))
+    out, ret = _iv(row.get("qty_outstanding_cmt")), _iv(row.get("qty_returned"))
+    acc, rej = _iv(row.get("qty_accepted")), _iv(row.get("qty_reject"))
+    rep, scr, ropen = _iv(row.get("qty_repaired")), _iv(row.get("qty_scrap")), _iv(row.get("qty_reject_open"))
+    shp, shb = _iv(row.get("qty_shipped_buyer")), _iv(row.get("qty_shippable_buyer"))
+    pecah = []
+    if o != ns + sc_: pecah.append(f"order {o} ≠ {ns}+{sc_}")
+    if sc_ != out + ret: pecah.append(f"keCMT {sc_} ≠ {out}+{ret}")
+    if ret != acc + rej: pecah.append(f"disetor {ret} ≠ {acc}+{rej}")
+    if rej != rep + scr + ropen: pecah.append(f"reject {rej} ≠ {rep}+{scr}+{ropen}")
+    if acc + rep != shp + shb: pecah.append(f"siap {acc}+{rep} ≠ {shp}+{shb}")
+    if pecah:
+        bad("F28-7", f"angka PO uji TIDAK seimbang: {' · '.join(pecah)}", json.dumps(row)[:250])
+    else:
+        ok("F28-7", f"5 identitas cocok pada PO uji: order {o} = gudang {ns} + keCMT {sc_} · "
+                    f"disetor {ret} = lolos {acc} + reject {rej} · reject = permak {rep} + "
+                    f"scrap {scr} + belum jelas {ropen} · siap {acc + rep} = terkirim {shp} + "
+                    f"sisa {shb}")
+
+    # identitas yang pecah secara agregat WAJIB menyebut PO penyebabnya
+    bisu = [k for k, c in checks.items() if not c.get("ok") and not (c.get("offenders") or [])]
+    if bisu:
+        bad("F28-7b", f"{len(bisu)} identitas pecah TANPA menyebut PO penyebab: {bisu} — "
+                      f"pemakai tidak bisa menelusuri", json.dumps(
+            {k: {kk: checks[k].get(kk) for kk in ("left", "right", "diff")} for k in bisu})[:200])
+    else:
+        rusak = [k for k, c in checks.items() if not c.get("ok")]
+        ok("F28-7b", "setiap identitas yang pecah menyebut PO penyebabnya"
+                     + (f" (pecah: {rusak})" if rusak else " (semuanya seimbang)"),
+           "; ".join(f"{k}: {checks[k].get('offenders')}" for k in rusak)[:200] or None)
+
+
 def cek_layar():
     """F28-6 — pintu di layar benar-benar ada."""
     wajib = [
         ("CMTMonitorModule.jsx", "monitor-scope-", "chip 'PO Berjalan' ↔ 'Semua PO'"),
-        ("CMTMonitorModule.jsx", "kpi-belum-ke-cmt", "kartu 'Belum dikirim ke CMT'"),
-        ("CMTMonitorModule.jsx", "kpi-ke-buyer", "kartu 'Sudah dikirim ke buyer'"),
+        ("CMTMonitorModule.jsx", "kpi-belum-ke-cmt", "kartu 2 'Belum dikirim ke CMT'"),
+        ("CMTMonitorModule.jsx", "kpi-lolos-qc", "kartu 6 'Lolos QC'"),
+        ("CMTMonitorModule.jsx", "kpi-reject-belum-jelas", "kartu 7 'Reject Belum Jelas'"),
+        ("CMTMonitorModule.jsx", "kpi-permak-berhasil", "kartu 8 'Permak Berhasil'"),
+        ("CMTMonitorModule.jsx", "kpi-scrap", "kartu 9 'Scrap / Hilang'"),
+        ("CMTMonitorModule.jsx", "kpi-sisa-bisa-kirim", "kartu 10 'Sisa Bisa Kirim'"),
+        ("CMTMonitorModule.jsx", "kpi-ke-buyer", "kartu 11 'Sudah dikirim ke buyer'"),
+        ("CMTMonitorModule.jsx", "kpi-biaya-permak", "kartu 12 biaya (jahit + permak dipisah)"),
+        ("CMTMonitorModule.jsx", "monitor-balance-strip", "baris pemeriksa keseimbangan"),
+        ("CMTMonitorModule.jsx", "chip-po-telat", "penanda PO TELAT (turun dari kartu)"),
+        ("CMTMonitorModule.jsx", "chip-komponen-kurang", "penanda Komponen Kurang"),
         ("CMTMonitorModule.jsx", "qty_sent_extra", "rincian pengganti/tambahan pada kartu potongan"),
         ("engine/BuyerShipmentModule.jsx", "outstanding-po-board", "papan sisa kirim per PO"),
         ("engine/BuyerShipmentModule.jsx", "board-dispatch-", "tombol lanjut dispatch di papan"),
@@ -333,6 +387,7 @@ def main():
     cek_potongan(adm, sc, po_no)
     cek_scope(db, adm, sc, po_no)
     cek_kartu_baru(db, adm, sc, po_no)
+    cek_keseimbangan(adm, po_no)
     cek_lacak_pengganti(db, adm, ven, parent or {}, appr)
     cek_layar()
     return verdict(db)

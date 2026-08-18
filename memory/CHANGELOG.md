@@ -1,3 +1,58 @@
+# [2026-06-18 #22] **MONITORING CMT DIRAPIKAN: 12 KARTU URUT ALUR PROSES + PEMERIKSA KESEIMBANGAN**
+
+## Pertanyaan pemilik yang memicu ini
+> "di card kirim ke buyer ada sisa kirim 90, itu dari mana nilainya? kalau disetor baru 100,
+> logikanya disetor − dikirim buyer harusnya 40 kan?"
+
+**Jawaban hasil pemeriksaan data (bukan tebakan):** 90 = **lolos QC 90 pcs** milik PO-MKL-…-9006
+(disetor 100, 10 pcs reject ⇒ hanya 90 yang boleh dikirim), sedangkan **60 pcs yang sudah ke buyer
+milik PO LAIN** (PO-MK-DEMO-2, penerimaannya bahkan masih `on_qc`). Jadi `100 − 60` mengurangkan dua
+PO yang berbeda. Rumus sisa bisa kirim memang **per PO/per item**, bukan agregat. Yang salah bukan
+angkanya, tapi **kartunya**: tahapan proses tidak terlihat sehingga mata pemakai menghubungkan angka
+yang tidak sebanding.
+
+## Yang dikerjakan (semua atas persetujuan pemilik)
+- **12 kartu, diurut sesuai alur proses** (dan diberi nomor 1..12 di layar):
+  1 Order (Qty PO) · 2 Belum Dikirim ke CMT *(sub: dari PO Draft)* · 3 Potongan ke CMT *(sub:
+  +pengganti/tambahan)* · 4 Sisa di CMT *(sub: selisih belum sampai)* · 5 Disetor dari CMT *(sub: Nx
+  setor)* · 6 **Lolos QC** · 7 **Reject Belum Jelas** (masih dipermak/belum diputuskan) ·
+  8 **Permak Berhasil** · 9 **Scrap / Hilang** · 10 **Sisa Bisa Kirim** · 11 Sudah Dikirim ke Buyer ·
+  12 **Biaya** (ongkos jahit + biaya permak dalam satu kartu, dua angka terpisah).
+- **Kartu 'Biaya Permak' yang berdiri sendiri dihapus** (digabung ke kartu 12) dan slotnya dipakai
+  **Scrap/Hilang** — qty yang benar-benar hilang / permak gagal, permintaan pemilik.
+- **PO TELAT & Komponen Kurang turun** jadi 2 chip di panel "Distribusi Status Kejar"
+  (`chip-po-telat`, `chip-komponen-kurang`) — tidak dihapus, hanya tidak lagi memakan slot kartu.
+- **Baris pemeriksa keseimbangan** (`monitor-balance-strip`) — 5 identitas yang membuat kartu tidak
+  bisa mengarang, tiap baris ✓/✗ dan yang ✗ bisa diklik untuk **menyebut PO penyebabnya**:
+  ```
+  Order            = Belum ke CMT + Potongan ke CMT
+  Potongan ke CMT  = Sisa di CMT + Disetor
+  Disetor          = Lolos QC + Reject
+  Reject           = Permak Berhasil + Scrap + Belum Jelas
+  Lolos QC + Permak Berhasil = Ke Buyer + Sisa Bisa Kirim
+  ```
+- **Sumber angka baru** semuanya dari `cmt_receipt_lines` yang sudah dibaca layar lain
+  (`qty_actual`, `reject_qty`, `qty_reworked_ok`, `qty_reject_scrapped`, `qty_short`) — tidak ada
+  koleksi baru, tidak ada rumus kedua.
+
+## Temuan yang langsung ketangkap pemeriksa keseimbangan
+**PO-MK-DEMO-2**: 60 pcs tercatat sudah dikirim ke buyer padahal penerimaannya belum di-QC
+(data demo lama, dibuat sebelum pagar kapasitas Fase E ada). Identitas ke-5 menandainya ✗ dan
+menyebut nomor PO-nya, jadi anomali seperti ini tidak bisa lagi lewat tanpa terlihat.
+
+## Bukti
+- Gate **INV-F28 naik jadi 11 invarian, HIJAU** — tambahan **F28-7** (5 identitas cocok pada PO uji:
+  order 100 = gudang 0 + keCMT 100 · disetor 100 = lolos 90 + reject 10 · reject = permak 0 + scrap 0
+  + belum jelas 10 · siap 90 = terkirim 40 + sisa 50) dan **F28-7b** (identitas yang pecah WAJIB
+  menyebut PO penyebab — kalau bisu, gate merah). F28-6 kini memeriksa 18 pintu layar.
+- **Gate penuh** `bash scripts/gate.sh` → **VERDICT HIJAU**.
+- **Testing agent iterasi 77**: 5/5 uji backend + 5/5 butir UI LULUS (12 kartu urut & nilainya cocok
+  dengan API, chip scope tetap bekerja, baris keseimbangan menyebut PO-MK-DEMO-2, kontras & tata
+  letak 1920px bersih). **0 isu.**
+
+
+---
+
 # [2026-06-18 #21] **MONITORING CMT: POTONGAN SESUAI ORDER** — 2 kartu baru · sudut pandang PO · Papan Sisa Kirim · rantai PENGGANTI terlacak
 
 ## Cacat yang diukur lebih dulu (bukan dugaan)

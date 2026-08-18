@@ -207,20 +207,32 @@ async def compute_po_kejar(db, po: Dict[str, Any], cfg: Dict[str, int], today: d
                 extra_by_type[kind] = extra_by_type.get(kind, 0) + q
 
     # Returned + accepted from Approved receipts
+    # Semua angka tahap QC diambil dari SATU sumber (`cmt_receipt_lines` penerimaan
+    # approved) supaya 12 kartu di Monitoring CMT bisa dibuktikan SEIMBANG:
+    #   disetor = lolos QC + reject   ·   reject = permak berhasil + scrap + belum jelas
     returned = accepted = 0
+    reject = repaired = scrapped = short_open = 0
     accepted_by_item: Dict[str, int] = {}
     approved_ids = await _approved_receipt_ids(db, po_id)
     kali_setor = len(approved_ids)
     if approved_ids and item_ids:
         lines = await db.cmt_receipt_lines.find(
             {"receipt_id": {"$in": approved_ids}, "po_item_id": {"$in": item_ids}},
-            {"_id": 0, "po_item_id": 1, "qty_shipped_by_cmt": 1, "qty_actual": 1},
+            {"_id": 0, "po_item_id": 1, "qty_shipped_by_cmt": 1, "qty_actual": 1,
+             "reject_qty": 1, "qty_reworked_ok": 1, "qty_reject_scrapped": 1,
+             "qty_short": 1, "qty_short_resolved": 1},
         ).to_list(None)
         for ln in lines:
             returned += _int(ln.get("qty_shipped_by_cmt"))
             a = _int(ln.get("qty_actual"))
             accepted += a
             accepted_by_item[ln["po_item_id"]] = accepted_by_item.get(ln["po_item_id"], 0) + a
+            reject += _int(ln.get("reject_qty"))
+            repaired += _int(ln.get("qty_reworked_ok"))
+            scrapped += _int(ln.get("qty_reject_scrapped"))
+            short_open += max(0, _int(ln.get("qty_short")) - _int(ln.get("qty_short_resolved")))
+    # reject yang nasibnya BELUM diketahui: masih dipermak / belum diputuskan
+    reject_open = max(0, reject - repaired - scrapped)
 
     outstanding_cmt = max(0, sent_cmt - returned)
     ongkos_jahit = round(sum(price_by_item.get(iid, 0) * q for iid, q in accepted_by_item.items()), 2)
@@ -263,6 +275,11 @@ async def compute_po_kejar(db, po: Dict[str, Any], cfg: Dict[str, int], today: d
         "is_draft": is_draft_po(po),
         "is_running": is_running_po(po),
         "qty_returned": returned,
+        "qty_reject": reject,                     # hasil QC yang ditolak
+        "qty_repaired": repaired,                 # permak berhasil → bisa dikirim lagi
+        "qty_scrap": scrapped,                    # dibuang / hilang (rugi)
+        "qty_reject_open": reject_open,           # nasibnya belum diketahui
+        "qty_short_open": short_open,             # diklaim CMT tapi belum sampai
         "qty_accepted": accepted,
         "qty_outstanding_cmt": outstanding_cmt,   # sisa di CMT
         "kali_setor": kali_setor,
@@ -332,11 +349,31 @@ async def owner_dashboard(db, scope: Optional[str] = None) -> Dict[str, Any]:
         "qty_sent_extra": 0, "qty_sent_extra_by_type": {},
         "qty_not_sent_cmt": 0, "qty_not_sent_draft": 0,
         "qty_shipped_buyer": 0, "qty_shippable_buyer": 0,
+        "qty_reject": 0, "qty_repaired": 0, "qty_scrap": 0,
+        "qty_reject_open": 0, "qty_short_open": 0,
         "buckets": {"telat": 0, "jatuh_tempo": 0, "mendekati": 0, "on_track": 0, "aman": 0, "tanpa_deadline": 0},
         "telat_pos": [],
     }
+    # Pemeriksa keseimbangan: PO mana yang identitasnya pecah (permintaan pemilik
+    # 2026-06 — "jika di total akan seimbang"). Diisi saat menjumlah tiap PO.
+    offenders: Dict[str, List[str]] = {k: [] for k in
+                                       ("order", "cmt", "qc", "reject", "buyer")}
     for po in pos:
         r = await compute_po_kejar(db, po, cfg, today, caps=caps)
+        no = r["po_number"]
+        if r["qty_ordered"] != r["qty_not_sent_cmt"] + r["qty_sent_cmt"]:
+            offenders["order"].append(no)
+        if r["qty_sent_cmt"] != r["qty_outstanding_cmt"] + r["qty_returned"]:
+            offenders["cmt"].append(no)
+        if r["qty_returned"] != r["qty_accepted"] + r["qty_reject"]:
+            offenders["qc"].append(no)
+        if r["qty_reject"] != r["qty_repaired"] + r["qty_scrap"] + r["qty_reject_open"]:
+            offenders["reject"].append(no)
+        if r["qty_accepted"] + r["qty_repaired"] != r["qty_shipped_buyer"] + r["qty_shippable_buyer"]:
+            offenders["buyer"].append(no)
+        for k in ("qty_reject", "qty_repaired", "qty_scrap", "qty_reject_open",
+                  "qty_short_open"):
+            agg[k] += r[k]
         agg["qty_ordered"] += r["qty_ordered"]
         agg["qty_sent_cmt"] += r["qty_sent_cmt"]
         agg["qty_returned"] += r["qty_returned"]
@@ -378,6 +415,39 @@ async def owner_dashboard(db, scope: Optional[str] = None) -> Dict[str, Any]:
     permak_open = sum(1 for p in permaks if p.get("status") in ("open", "in_progress"))
     agg["biaya_permak"] = biaya_permak
     agg["permak_open"] = permak_open
+
+    # ── PEMERIKSA KESEIMBANGAN (12 kartu harus bisa dipertanggungjawabkan) ────
+    # Lima identitas ini yang membuat kartu tidak bisa "mengarang": kalau salah
+    # satu pecah, PO penyebabnya disebut namanya supaya bisa langsung diperiksa
+    # (mis. dispatch lama yang dibuat sebelum pagar QC ada).
+    agg["balance"] = {
+        "checks": [
+            {"key": "order", "label": "Order = Belum ke CMT + Potongan ke CMT",
+             "left": agg["qty_ordered"],
+             "right": agg["qty_not_sent_cmt"] + agg["qty_sent_cmt"],
+             "offenders": offenders["order"][:12]},
+            {"key": "cmt", "label": "Potongan ke CMT = Sisa di CMT + Disetor",
+             "left": agg["qty_sent_cmt"],
+             "right": agg["qty_outstanding_cmt"] + agg["qty_returned"],
+             "offenders": offenders["cmt"][:12]},
+            {"key": "qc", "label": "Disetor = Lolos QC + Reject",
+             "left": agg["qty_returned"],
+             "right": agg["qty_accepted"] + agg["qty_reject"],
+             "offenders": offenders["qc"][:12]},
+            {"key": "reject", "label": "Reject = Permak Berhasil + Scrap + Belum Jelas",
+             "left": agg["qty_reject"],
+             "right": agg["qty_repaired"] + agg["qty_scrap"] + agg["qty_reject_open"],
+             "offenders": offenders["reject"][:12]},
+            {"key": "buyer", "label": "Lolos QC + Permak Berhasil = Ke Buyer + Sisa Bisa Kirim",
+             "left": agg["qty_accepted"] + agg["qty_repaired"],
+             "right": agg["qty_shipped_buyer"] + agg["qty_shippable_buyer"],
+             "offenders": offenders["buyer"][:12]},
+        ],
+    }
+    for c in agg["balance"]["checks"]:
+        c["ok"] = c["left"] == c["right"]
+        c["diff"] = c["left"] - c["right"]
+    agg["balance"]["all_ok"] = all(c["ok"] for c in agg["balance"]["checks"])
 
     agg["config"] = cfg
     return agg

@@ -8,8 +8,8 @@
   },
   "blocking": 0,
   "block_sev": [],
-  "duration_s": 9.01,
-  "ts": "2026-08-18 14:54:39",
+  "duration_s": 9.55,
+  "ts": "2026-08-18 16:33:43",
   "findings": [
     {
       "sev": "WARN",

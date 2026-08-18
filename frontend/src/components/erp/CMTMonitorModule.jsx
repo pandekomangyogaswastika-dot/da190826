@@ -10,6 +10,7 @@ import {
   Siren, RefreshCw, LayoutDashboard, ListChecks, AlertTriangle, Truck, PackageCheck,
   Boxes, Wallet, Wrench, Clock, Loader2, CalendarClock,
   PackageSearch, ScanLine, ShieldCheck, Copy, ShoppingCart, Gauge, Factory, TrendingUp, GitCompare, CheckCircle2,
+  Trash2, XCircle, ChevronDown, Warehouse,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { apiGet } from '../../lib/api';
@@ -87,6 +88,7 @@ export default function CMTMonitorModule() {
   // pernah bisa dilihat. Sekarang pemakai memilih: PO Berjalan (default) atau
   // Semua PO — dan SELURUH kartu + papan ikut berubah.
   const [scope, setScope] = useState('running');
+  const [openBalance, setOpenBalance] = useState('');
   const [loading, setLoading] = useState(false);
 
   const load = useCallback(async () => {
@@ -199,27 +201,113 @@ export default function CMTMonitorModule() {
       {/* ── DASHBOARD OWNER ── */}
       {tab === 'dashboard' && dash && (
         <div className="space-y-4" data-testid="monitor-dashboard-panel">
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
-            <Kpi label="Potongan ke CMT" testid="kpi-potongan-ke-cmt" value={fmt(dash.qty_sent_cmt)}
-              sub={dash.qty_sent_extra
-                ? `pcs sesuai order · +${fmt(dash.qty_sent_extra)} pengganti/tambahan`
-                : 'pcs sesuai order (kiriman NORMAL)'}
-              icon={Truck} tone="blue" />
-            <Kpi label="Belum Dikirim ke CMT" testid="kpi-belum-ke-cmt" value={fmt(dash.qty_not_sent_cmt)}
-              sub={`masih di gudang · dari PO Draft: ${fmt(dash.qty_not_sent_draft)} pcs`}
-              icon={Boxes} tone="amber" />
-            <Kpi label="Disetor (balik)" value={fmt(dash.qty_returned)} sub={`${fmt(dash.kali_setor)}x setor`} icon={PackageCheck} tone="emerald" />
-            <Kpi label="Sisa di CMT" value={fmt(dash.qty_outstanding_cmt)} sub="belum disetor" icon={Boxes} tone="amber" />
-            <Kpi label="Sudah Dikirim ke Buyer" testid="kpi-ke-buyer" value={fmt(dash.qty_shipped_buyer)}
-              sub={`sisa bisa kirim: ${fmt(dash.qty_shippable_buyer)} pcs`}
-              icon={PackageCheck} tone="emerald" />
-            <Kpi label="PO TELAT" value={fmt(b.telat)} sub={`${fmt(b.jatuh_tempo)} jatuh tempo`} icon={AlertTriangle} tone="red" />
-            <Kpi label="Ongkos Jahit" value={fmtRp(dash.ongkos_jahit_terhitung)} sub="dari qty diterima" icon={Wallet} tone="violet" />
-            <Kpi label="Komponen Kurang" value={fmt(dash.komponen_kurang_open?.requests)} sub={`${fmt(dash.komponen_kurang_open?.qty)} pcs belum diterima`} icon={AlertTriangle} tone="amber" />
-            <Kpi label="Biaya Permak" value={fmtRp(dash.biaya_permak)} sub={`${fmt(dash.permak_open)} permak aktif`} icon={Wrench} tone="blue" />
-            <Kpi label="Order (Qty PO)" value={fmt(dash.qty_ordered)}
+          {/* ══ 12 KARTU, URUT SESUAI ALUR PROSES (permintaan pemilik 2026-06) ══
+              Order → gudang → CMT → setor → QC → permak/scrap → siap kirim →
+              terkirim → biaya. Angkanya SEIMBANG (lihat baris pemeriksa di bawah). */}
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 gap-3">
+            <Kpi label="1. Order (Qty PO)" testid="kpi-order" value={fmt(dash.qty_ordered)}
               sub={`${fmt(dash.total_po)} PO ${dash.scope === 'all' ? '(semua)' : 'berjalan'} · ${fmt(dash.po_draft)} draft`}
               icon={ListChecks} tone="default" />
+            <Kpi label="2. Belum Dikirim ke CMT" testid="kpi-belum-ke-cmt" value={fmt(dash.qty_not_sent_cmt)}
+              sub={`masih di gudang · dari PO Draft: ${fmt(dash.qty_not_sent_draft)} pcs`}
+              icon={Warehouse} tone="amber" />
+            <Kpi label="3. Potongan ke CMT" testid="kpi-potongan-ke-cmt" value={fmt(dash.qty_sent_cmt)}
+              sub={dash.qty_sent_extra
+                ? `sesuai order · +${fmt(dash.qty_sent_extra)} pengganti/tambahan`
+                : 'pcs sesuai order (kiriman NORMAL)'}
+              icon={Truck} tone="blue" />
+            <Kpi label="4. Sisa di CMT" testid="kpi-sisa-di-cmt" value={fmt(dash.qty_outstanding_cmt)}
+              sub={dash.qty_short_open
+                ? `belum disetor · selisih belum sampai: ${fmt(dash.qty_short_open)} pcs`
+                : 'belum disetor ke DA'}
+              icon={Boxes} tone="amber" />
+            <Kpi label="5. Disetor dari CMT" testid="kpi-disetor" value={fmt(dash.qty_returned)}
+              sub={`${fmt(dash.kali_setor)}x setor · yang benar-benar sampai`}
+              icon={PackageSearch} tone="blue" />
+            <Kpi label="6. Lolos QC" testid="kpi-lolos-qc" value={fmt(dash.qty_accepted)}
+              sub="langsung bagus · masuk stok FG" icon={ShieldCheck} tone="emerald" />
+            <Kpi label="7. Reject Belum Jelas" testid="kpi-reject-belum-jelas" value={fmt(dash.qty_reject_open)}
+              sub={`dari ${fmt(dash.qty_reject)} reject · masih dipermak / belum diputuskan`}
+              icon={Clock} tone="amber" />
+            <Kpi label="8. Permak Berhasil" testid="kpi-permak-berhasil" value={fmt(dash.qty_repaired)}
+              sub="reject jadi bagus lagi · boleh dikirim" icon={Wrench} tone="blue" />
+            <Kpi label="9. Scrap / Hilang" testid="kpi-scrap" value={fmt(dash.qty_scrap)}
+              sub="dibuang · permak gagal (rugi)" icon={Trash2} tone="red" />
+            <Kpi label="10. Sisa Bisa Kirim" testid="kpi-sisa-bisa-kirim" value={fmt(dash.qty_shippable_buyer)}
+              sub="siap dikirim ke buyer (lolos QC + permak − terkirim)"
+              icon={PackageCheck} tone="emerald" />
+            <Kpi label="11. Sudah Dikirim ke Buyer" testid="kpi-ke-buyer" value={fmt(dash.qty_shipped_buyer)}
+              sub="sudah keluar dari gudang FG" icon={Truck} tone="emerald" />
+            {/* 12 — dua biaya dalam satu kartu, tetap terpisah angkanya */}
+            <div className="rounded-xl border border-border bg-card p-4" data-testid="kpi-biaya">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-medium text-muted-foreground">12. Biaya</span>
+                <Wallet size={16} className="text-muted-foreground/60" />
+              </div>
+              <div className="mt-1">
+                <div className="text-lg font-bold text-violet-600" data-testid="kpi-biaya-jahit">{fmtRp(dash.ongkos_jahit_terhitung)}</div>
+                <div className="text-[11px] text-muted-foreground">ongkos jahit (dari qty lolos QC)</div>
+              </div>
+              <div className="mt-1.5 pt-1.5 border-t border-border">
+                <div className="text-lg font-bold text-blue-600" data-testid="kpi-biaya-permak">{fmtRp(dash.biaya_permak)}</div>
+                <div className="text-[11px] text-muted-foreground">biaya permak · {fmt(dash.permak_open)} permak aktif</div>
+              </div>
+            </div>
+          </div>
+
+          {/* ── PEMERIKSA KESEIMBANGAN — 5 identitas, klik untuk lihat PO penyebab ── */}
+          <div className={`rounded-xl border p-3 ${dash.balance?.all_ok ? 'border-emerald-200 bg-emerald-50/50' : 'border-red-200 bg-red-50/50'}`}
+            data-testid="monitor-balance-strip">
+            <div className="flex items-center gap-2 mb-2">
+              {dash.balance?.all_ok
+                ? <CheckCircle2 size={15} className="text-emerald-600" />
+                : <XCircle size={15} className="text-red-600" />}
+              <h3 className={`text-sm font-semibold ${dash.balance?.all_ok ? 'text-emerald-800' : 'text-red-700'}`}>
+                {dash.balance?.all_ok
+                  ? 'Semua angka seimbang — 5 identitas cocok'
+                  : 'Ada angka yang tidak seimbang — klik barisnya untuk lihat PO penyebab'}
+              </h3>
+            </div>
+            <div className="space-y-1">
+              {(dash.balance?.checks || []).map(c => (
+                <div key={c.key}>
+                  <button type="button"
+                    onClick={() => setOpenBalance(openBalance === c.key ? '' : c.key)}
+                    disabled={c.ok}
+                    data-testid={`balance-check-${c.key}`}
+                    className={`w-full flex items-center gap-2 text-left text-xs px-2 py-1.5 rounded-lg border transition-colors ${
+                      c.ok ? 'border-emerald-200 bg-card/60 cursor-default'
+                           : 'border-red-200 bg-card hover:bg-red-50'}`}>
+                    <span className={c.ok ? 'text-emerald-600' : 'text-red-600'}>{c.ok ? '✓' : '✗'}</span>
+                    <span className="text-foreground/90 flex-1">{c.label}</span>
+                    <span className="font-mono text-muted-foreground">{fmt(c.left)} vs {fmt(c.right)}</span>
+                    {!c.ok && (
+                      <>
+                        <span className="font-mono font-bold text-red-600">selisih {fmt(c.diff)}</span>
+                        <ChevronDown size={13} className={`text-red-600 transition-transform ${openBalance === c.key ? 'rotate-180' : ''}`} />
+                      </>
+                    )}
+                  </button>
+                  {!c.ok && openBalance === c.key && (
+                    <div className="mt-1 ml-6 rounded-lg border border-red-200 bg-card px-3 py-2 text-xs"
+                      data-testid={`balance-offenders-${c.key}`}>
+                      <p className="text-muted-foreground mb-1">PO yang membuat identitas ini pecah:</p>
+                      <div className="flex flex-wrap gap-1.5">
+                        {(c.offenders || []).length === 0
+                          ? <span className="text-muted-foreground italic">tidak ada PO tertentu (selisih dari pembulatan data lama)</span>
+                          : c.offenders.map(no => (
+                            <span key={no} className="px-1.5 py-0.5 rounded bg-red-100 text-red-700 font-mono text-[11px] font-semibold">{no}</span>
+                          ))}
+                      </div>
+                      <p className="text-muted-foreground/80 mt-1.5">
+                        Penyebab paling umum: dispatch ke buyer dibuat sebelum ada QC penerimaan
+                        (data lama), atau penerimaan belum disetujui.
+                      </p>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
           </div>
 
           {/* Rincian kiriman anak — supaya tidak ada yang merasa angkanya "hilang" */}
@@ -239,7 +327,7 @@ export default function CMTMonitorModule() {
             <h3 className="text-sm font-semibold text-foreground mb-3">
               Distribusi Status Kejar ({fmt(dash.total_po)} PO {dash.scope === 'all' ? 'semua' : 'berjalan'})
             </h3>
-            <div className="flex flex-wrap gap-3">
+            <div className="flex flex-wrap gap-3 items-center">
               {Object.entries(BUCKET_META).map(([k, m]) => (
                 <div key={k} className="flex items-center gap-2 text-sm">
                   <span className={`inline-block h-2.5 w-2.5 rounded-full ${m.dot}`} />
@@ -247,6 +335,17 @@ export default function CMTMonitorModule() {
                   <span className="font-semibold text-foreground">{fmt(b[k])}</span>
                 </div>
               ))}
+              {/* Dua penanda yang turun dari kartu (tetap terlihat, tidak dihapus) */}
+              <span className="inline-flex items-center gap-1.5 px-2 py-1 rounded-full border border-red-200 bg-red-50 text-xs font-semibold text-red-700"
+                data-testid="chip-po-telat">
+                <AlertTriangle size={12} /> PO TELAT: {fmt(b.telat)}
+                <span className="font-normal text-red-600/80">({fmt(b.jatuh_tempo)} jatuh tempo)</span>
+              </span>
+              <span className="inline-flex items-center gap-1.5 px-2 py-1 rounded-full border border-amber-200 bg-amber-50 text-xs font-semibold text-amber-700"
+                data-testid="chip-komponen-kurang">
+                <AlertTriangle size={12} /> Komponen Kurang: {fmt(dash.komponen_kurang_open?.requests)}
+                <span className="font-normal text-amber-600/90">({fmt(dash.komponen_kurang_open?.qty)} pcs belum diterima)</span>
+              </span>
             </div>
           </div>
 

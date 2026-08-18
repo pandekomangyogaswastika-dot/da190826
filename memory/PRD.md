@@ -1088,3 +1088,14 @@ Aturan tetap yang lahir dari sesi ini (jangan dilanggar tanpa keputusan owner ba
 - **Rantai pengganti wajib terlacak**: permintaan → SJ pengganti → diterima vendor → diinspeksi,
   terlihat di layar vendor MAUPUN admin, dan dua arah (SJ anak menunjuk permintaannya).
 - Dijaga gate **INV-F28** (`scripts/verify_monitoring_cmt_potongan.py`).
+
+## Monitoring CMT — 12 kartu & keseimbangan (2026-06-18, sesi #22)
+- Kartu WAJIB berurut sesuai alur proses (order → gudang → CMT → setor → QC → permak/scrap → siap
+  kirim → terkirim → biaya) dan diberi nomor di layar; pemakai harus bisa membaca ke bawah tanpa
+  membandingkan angka dari tahap yang berbeda.
+- Angka kartu WAJIB seimbang dan dibuktikan di layar lewat 5 identitas (lihat CHANGELOG #22).
+  Identitas yang pecah HARUS menyebut nomor PO penyebabnya — dijaga gate INV-F28 (F28-7b).
+- 'Scrap/Hilang' = qty yang benar-benar hilang atau permak gagal (bukan biaya). Biaya jahit & biaya
+  permak digabung dalam satu kartu tetapi angkanya tetap dipisah.
+- Sisa bisa kirim SELALU per PO/per item (lolos QC + permak berhasil − terkirim); tidak boleh
+  dijelaskan sebagai "disetor − terkirim" karena dua angka itu bisa berasal dari PO berbeda.
